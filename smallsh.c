@@ -20,7 +20,7 @@ int main(void) {
 
    *  Managing background processes 
    *  --------------------------------
-  */ 
+   */  
    
   // check for un-waited-for-background processes in the same process group ID as smallsh
   
@@ -37,6 +37,9 @@ int main(void) {
   
   if (bytes_read == -1) {
      perror("Getline() failed."); 
+     /* check for signal interruptions (signal handling) --> print newline and
+      * spawn new command prompt (check for background processes) --> continue input line read
+      */
   }
   else {
     printf("\nRead number of bytes from getline(): %zd", bytes_read);
@@ -47,4 +50,19 @@ int main(void) {
 
 
   return 0; 
+}
+
+void *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict sub) {
+  
+  char *str = *haystack;
+  size_t haystack_len = strlen(str); 
+  size_t const needle_len = strlen(needle), 
+               sub_len = strlen(sub); 
+
+  for (;;) {
+    str = strstr(str, needle);
+    if (!str) break;
+
+    // realloc 
+  }
 }
