@@ -6,41 +6,81 @@
 #include <string.h> 
 
 
+
 /* Convenient macro to get the length of an array (number of elements) */
 #define arrlen(a) (sizeof(a) / sizeof *(a))
+#define TOKENS 512
+
+// split words and store into an array of string ptrs
+static int split_word(char *input, char *ptrArray[]);
 
 
-static int split_word(char *input, const char *delim, char *tokenArray[]);
 
 
+static int split_word(char *input, char *ptrArray[]) {
 
-
-
-
-//static int splitword(char *input, const char *delim, char *tokenArray[]) {
-
-static int splitword(char *input, const char *delim) {
-  
   char *ifs_env = getenv("IFS");
   char *token = NULL;
+  char *copy = NULL;
+  int index = 0;
 
+
+  // if unset --> "space - tab - new line"
   if (ifs_env == NULL) {
     ifs_env = " \t\n"; 
   }
 
-  //while (strtok(char *input, ifs_env, tokenArray) !== NULL) {
- 
+
   token = strtok(input, ifs_env); 
-  printf("First token = %s\n", token); 
-  for (;;) {
-    token = strtok(NULL, ifs_env);
-    printf("Next Token = %s\n", token); 
+  printf("First token =%s\n", token);
 
-    if (token == NULL) { break;} 
+  copy = strdup(token);
+  //printf("Copied token =%s\n", copy); 
 
+  // allocate memory in str pointer based on len of token
+  ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof(char));
+
+  if (ptrArray[index] == NULL) {
+    perror("mallloc failed, exiting...");
+    exit(1); 
   }
 
+  strcpy(ptrArray[index], copy);
+  free(copy);
+
+  for (;;) {
+
+    index++;
+    copy = NULL;
+
+    token = strtok(NULL, ifs_env);
+    printf("Next Token =%s\n", token); 
+
+    if (token == NULL) { break;}
+
+    copy = strdup(token);
+    ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof(char));
+
+    if (ptrArray[index] == NULL) {
+      perror("mallloc failed, exiting...");
+      exit(1); 
+    }
+
+    strcpy(ptrArray[index], copy);
+    free(copy);
+  }
+
+  printf("The strings are:\n");
+
+   // print the ptrArray
+  for (int j = 0; j < index; j++) {
+    printf("%s\n", ptrArray[j]); 
+  }
+
+  printf("Done splitting word and printing tokens.\n"); 
   return 0; 
+
+  // don't forget to free(ptrArray[index] after finishing !!
 }
 
 
@@ -53,23 +93,37 @@ static int splitword(char *input, const char *delim) {
 int main(void) {
 
   char *env_name = NULL;
-  
+
   FILE *fp = stdin;
   char *line = NULL;
   size_t buff_size = 0;
   ssize_t bytes_read; 
+
+  char *ptrArray[TOKENS]; 
 
   /* ************ INPUT *********************
 
    *  Managing background processes 
    *  --------------------------------
    */  
-   
+
   // check for un-waited-for-background processes in the same process group ID as smallsh
-  
+
   /*  The prompt 
    *  --------------------------------
-  */ 
+   */
+
+  char input[21] = "Healing time is now."; 
+  split_word(input, ptrArray);
+
+
+  // Check if ptrArray is retained after function changes... success (lifeline) 
+  printf("\n\n"); 
+   // print the ptrArray
+  for (int j = 0; j < 4; j++) {
+    printf("%s\n", ptrArray[j]); 
+  }
+
 
   // expand PS1 environment variable | fprintf() prints to desig stream
   env_name = getenv("PS1");
@@ -77,12 +131,12 @@ int main(void) {
 
   // read a line of input from stdin [getline(3)]
   bytes_read = getline(&line, &buff_size, fp);
-  
+
   if (bytes_read == -1) {
-     perror("Getline() failed."); 
-     /* check for signal interruptions (signal handling) --> print newline and
-      * spawn new command prompt (check for background processes) --> continue input line read
-      */
+    perror("Getline() failed."); 
+    /* check for signal interruptions (signal handling) --> print newline and
+     * spawn new command prompt (check for background processes) --> continue input line read
+     */
   }
   else {
     printf("\nRead number of bytes from getline(): %zd", bytes_read);
@@ -97,17 +151,17 @@ int main(void) {
 
 
 
-void *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict sub) {
-  
-  char *str = *haystack;
-  size_t haystack_len = strlen(str); 
-  size_t const needle_len = strlen(needle), 
-               sub_len = strlen(sub); 
-
-  for (;;) {
-    str = strstr(str, needle);
-    if (!str) break;
-
-    // realloc 
-  }
-}
+//void *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict sub) {
+//  
+//  char *str = *haystack;
+//  size_t haystack_len = strlen(str); 
+//  size_t const needle_len = strlen(needle), 
+//               sub_len = strlen(sub); 
+//
+//  for (;;) {
+//    str = strstr(str, needle);
+//    if (!str) break;
+//
+//    // realloc 
+//  }
+//}
