@@ -102,32 +102,41 @@ int main(void) {
   char *ptrArray[TOKENS]; 
 
   /* ************ INPUT *********************
+   *  
+   *  ---------------------------------------------------------
+   *  Input - Managing background processes (NEED TO INCLUDE)
+   *  ---------------------------------------------------------
 
-   *  Managing background processes 
-   *  --------------------------------
-   */  
+   *  check for un-waited-for-background processes in the same process group ID as smallsh
+   *  -----------------------------------------------------
+  */
 
-  // check for un-waited-for-background processes in the same process group ID as smallsh
 
-  /*  The prompt 
+
+
+
+
+
+
+
+
+  // ------ Testing portion (above ^^^^ ) -------- Top of code starts below (vvvvv) --------
+
+  /*  --------------------------------
+   *  Input - The prompt (DONE)
    *  --------------------------------
    */
 
-  char input[21] = "Healing time is now."; 
-  split_word(input, ptrArray);
-
-
-  // Check if ptrArray is retained after function changes... success (lifeline) 
-  printf("\n\n"); 
-   // print the ptrArray
-  for (int j = 0; j < 4; j++) {
-    printf("%s\n", ptrArray[j]); 
-  }
-
-
   // expand PS1 environment variable | fprintf() prints to desig stream
   env_name = getenv("PS1");
-  fprintf(stderr, "The environment name is: %s",env_name);
+  fprintf(stderr, "%s",env_name);
+
+  /*
+   * ------------------------------------------------
+   * Input - Reading a line of input (Almost done)
+   * ...include more on reading interrupted by signal...clearerr(3)
+   * ------------------------------------------------
+   */
 
   // read a line of input from stdin [getline(3)]
   bytes_read = getline(&line, &buff_size, fp);
@@ -139,8 +148,11 @@ int main(void) {
      */
   }
   else {
-    printf("\nRead number of bytes from getline(): %zd", bytes_read);
+    printf("\nRead number of bytes from getline(): %zd\n", bytes_read);
   }
+ 
+  // split words
+  split_word(line, ptrArray);
 
   free(line);
 
