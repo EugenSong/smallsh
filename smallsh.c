@@ -11,18 +11,20 @@
 /* Convenient macro to get the length of an array (number of elements) */
 #define arrlen(a) (sizeof(a) / sizeof *(a))
 
-// split words and store into an array of string ptrs
-static int split_word(char *input, char *ptrArray[]);
+// function to split words and store into an array of string ptrs 
+static int split_word(int elements, char *input, char *ptrArray[]);
 
-// string search and replace function
-char *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict substitute); 
+// function to string search and replace
+static char *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict substitute); 
+
+// function to word expansion
+static void perform_expansion(int elements, char *ptrArray[]);
 
 
-
-
-int main(void) {
+int main(int argc, char *argv[]) {
 
   char *env_name = NULL;
+  int elements = 0;
 
   FILE *fp = stdin;
   char *line = NULL;   // keep outside main infinite loop 
@@ -46,6 +48,17 @@ int main(void) {
   printf("\nexpan_env is %s\n", expan_env); 
 
 
+  char* line2 = NULL;
+  size_t n = 0;
+  getline(&line2, &n, stdin);
+  {
+    char *ret = str_substitute(&line2, argv[1], argv[2]); 
+    if (!ret) exit(1); 
+    line2 = ret;
+  }
+  printf("%s", line); 
+
+  free(line2); 
 
 
 
@@ -84,7 +97,21 @@ int main(void) {
   }
 
   // split words
-  split_word(line, ptrArray);
+  split_word(elements, line, ptrArray);
+
+
+
+  // parsing needs to happen before expansion
+
+
+
+
+  // perform expansion 
+
+
+
+
+
 
   free(line);
 
@@ -93,8 +120,35 @@ int main(void) {
   return 0; 
 }
 
+static void perform_expansion(int elements, char *ptrArray[]) {
 
-static int split_word(char *input, char *ptrArray[]) {
+  char *expan_env = NULL;
+  expan_env = getenv("HOME");
+  printf("\nexpan_env is %s\n", expan_env); 
+
+   int i = 0;
+   printf("size of ptrArray is %d\n", elements);
+
+   while (i < elements) {
+
+     // ensure each token is >= size 2
+     if (strlen(ptrArray[i]) >= 2) {
+          
+              // “~/” at the beginning of a word shall be replaced with the value of the HOME environment variable
+          if (strncmp(ptrArray[i], "~/", 2) == 0) {
+              str_substitute(&ptrArray[i], "~", expan_env);
+          }
+
+
+         }
+
+     i++; 
+         }
+ 
+}
+
+
+static int split_word(int elements, char *input, char *ptrArray[]) {
 
   char *ifs_env = getenv("IFS");
   char *token = NULL;
@@ -145,6 +199,7 @@ static int split_word(char *input, char *ptrArray[]) {
 
     strcpy(ptrArray[index], copy);
     free(copy);
+    elements++; 
   }
 
   printf("The strings are:\n");
@@ -163,12 +218,12 @@ static int split_word(char *input, char *ptrArray[]) {
 
 
 
-char *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict substitute) {
-  
+static char *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict substitute) {
+
   char *str = *haystack;
   size_t haystack_len = strlen(str); 
   size_t const needle_len = strlen(needle), 
-               sub_len = strlen(substitute); 
+         sub_len = strlen(substitute); 
 
   for (;;) {
 
@@ -181,31 +236,32 @@ char *str_substitute(char *restrict *restrict haystack, char const *restrict nee
     // realloc - update size of haystack if replacement is longer or shorter than needle, need to resize the memory location 
     if (sub_len > needle_len) {
       str = realloc(*haystack, sizeof **haystack * (haystack_len + sub_len - needle_len + 1));
-          if (str == NULL) {
-            goto exit;  
-          }
+      if (str == NULL) {
+        goto exit;  
+      }
 
-          // move haystack start pointer to str
-          *haystack = str;
-          str = *haystack + offset; 
-  }
+      // move haystack start pointer to str
+      *haystack = str;
+      str = *haystack + offset; 
+    }
     memmove(str + sub_len, str + needle_len, haystack_len + 1 - offset - needle_len);  
     memcpy(str, substitute, sub_len);
-    haystack_len = haystack_len + sub_len - needle_len; 
+    haystack_len = haystack_len + sub_len - needle_len;
+
+    // important to move str ptr so loop knows to quit
     str += sub_len; 
   }
   str = *haystack;
 
-  // CASE 2: Replacement string is shorter than needle size 
-  // shrink haystack size
+  // CASE 2: Replacement string is shorter than needle size --> shrink haystack size after memmove / memcpy 
   if (sub_len < needle_len) {
-    str = realloc(*haystack, sizeof ** haystack * (haystack_len+1));
+    str = realloc(*haystack, sizeof **haystack * (haystack_len+1));
     if (str == NULL) {
       goto exit; 
     }
     *haystack = str; 
   }
-  
+
 exit: 
   return str; 
 }
