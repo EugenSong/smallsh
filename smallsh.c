@@ -3,89 +3,19 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h> 
+#include <string.h>
+#include <stddef.h>
 
 
 
 /* Convenient macro to get the length of an array (number of elements) */
 #define arrlen(a) (sizeof(a) / sizeof *(a))
-#define TOKENS 512
 
 // split words and store into an array of string ptrs
 static int split_word(char *input, char *ptrArray[]);
 
-
-
-
-static int split_word(char *input, char *ptrArray[]) {
-
-  char *ifs_env = getenv("IFS");
-  char *token = NULL;
-  char *copy = NULL;
-  int index = 0;
-
-
-  // if unset --> "space - tab - new line"
-  if (ifs_env == NULL) {
-    ifs_env = " \t\n"; 
-  }
-
-
-  token = strtok(input, ifs_env); 
-  printf("First token =%s\n", token);
-
-  copy = strdup(token);
-  //printf("Copied token =%s\n", copy); 
-
-  // allocate memory in str pointer based on len of token
-  ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof(char));
-
-  if (ptrArray[index] == NULL) {
-    perror("mallloc failed, exiting...");
-    exit(1); 
-  }
-
-  strcpy(ptrArray[index], copy);
-  free(copy);
-
-  for (;;) {
-
-    index++;
-    copy = NULL;
-
-    token = strtok(NULL, ifs_env);
-    printf("Next Token =%s\n", token); 
-
-    if (token == NULL) { break;}
-
-    copy = strdup(token);
-    ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof(char));
-
-    if (ptrArray[index] == NULL) {
-      perror("mallloc failed, exiting...");
-      exit(1); 
-    }
-
-    strcpy(ptrArray[index], copy);
-    free(copy);
-  }
-
-  printf("The strings are:\n");
-
-   // print the ptrArray
-  for (int j = 0; j < index; j++) {
-    printf("%s\n", ptrArray[j]); 
-  }
-
-  printf("Done splitting word and printing tokens.\n"); 
-  return 0; 
-
-  // don't forget to free(ptrArray[index] after finishing !!
-}
-
-
-
-
+// string search and replace function
+char *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict substitute); 
 
 
 
@@ -95,11 +25,11 @@ int main(void) {
   char *env_name = NULL;
 
   FILE *fp = stdin;
-  char *line = NULL;
+  char *line = NULL;   // keep outside main infinite loop 
   size_t buff_size = 0;
-  ssize_t bytes_read; 
+  ssize_t bytes_read;  // later: maybe move into main infinite loop like example
 
-  char *ptrArray[TOKENS]; 
+  char *ptrArray[512]; 
 
   /* ************ INPUT *********************
    *  
@@ -109,9 +39,11 @@ int main(void) {
 
    *  check for un-waited-for-background processes in the same process group ID as smallsh
    *  -----------------------------------------------------
-  */
+   */
 
-
+  char *expan_env = NULL;
+  expan_env = getenv("HOME");
+  printf("\nexpan_env is %s\n", expan_env); 
 
 
 
@@ -150,7 +82,7 @@ int main(void) {
   else {
     printf("\nRead number of bytes from getline(): %zd\n", bytes_read);
   }
- 
+
   // split words
   split_word(line, ptrArray);
 
@@ -162,18 +94,119 @@ int main(void) {
 }
 
 
+static int split_word(char *input, char *ptrArray[]) {
 
-//void *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict sub) {
-//  
-//  char *str = *haystack;
-//  size_t haystack_len = strlen(str); 
-//  size_t const needle_len = strlen(needle), 
-//               sub_len = strlen(sub); 
-//
-//  for (;;) {
-//    str = strstr(str, needle);
-//    if (!str) break;
-//
-//    // realloc 
-//  }
-//}
+  char *ifs_env = getenv("IFS");
+  char *token = NULL;
+  char *copy = NULL;
+  int index = 0;
+
+
+  // if unset --> "space - tab - new line"
+  if (ifs_env == NULL) {
+    ifs_env = " \t\n"; 
+  }
+
+
+  token = strtok(input, ifs_env); 
+  printf("First token =%s\n", token);
+
+  copy = strdup(token);
+  //printf("Copied token =%s\n", copy); 
+
+  // allocate memory in str pointer based on len of token
+  ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof (*ptrArray));
+
+  if (ptrArray[index] == NULL) {
+    perror("mallloc failed, exiting...");
+    exit(1); 
+  }
+
+  strcpy(ptrArray[index], copy);
+  free(copy);
+
+  for (;;) {
+
+    index++;
+    copy = NULL;
+
+    token = strtok(NULL, ifs_env);
+    printf("Next Token =%s\n", token); 
+
+    if (token == NULL) { break;}
+
+    copy = strdup(token);
+    ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof (*ptrArray));
+
+    if (ptrArray[index] == NULL) {
+      perror("mallloc failed, exiting...");
+      exit(1); 
+    }
+
+    strcpy(ptrArray[index], copy);
+    free(copy);
+  }
+
+  printf("The strings are:\n");
+
+  // print the ptrArray
+  for (int j = 0; j < index; j++) {
+    printf("%s\n", ptrArray[j]); 
+  }
+
+  printf("Done splitting word and printing tokens.\n"); 
+  return 0; 
+
+  // don't forget to free(ptrArray[index] after finishing !!
+}
+
+
+
+
+char *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict substitute) {
+  
+  char *str = *haystack;
+  size_t haystack_len = strlen(str); 
+  size_t const needle_len = strlen(needle), 
+               sub_len = strlen(substitute); 
+
+  for (;;) {
+
+    // search the pointer to the array of char pointers for existing needle... exit if DNE
+    str = strstr(str, needle);
+    if (!str) break;
+    ptrdiff_t offset = str - *haystack;
+
+    // CASE 1: Replacement string is longer than needle size 
+    // realloc - update size of haystack if replacement is longer or shorter than needle, need to resize the memory location 
+    if (sub_len > needle_len) {
+      str = realloc(*haystack, sizeof **haystack * (haystack_len + sub_len - needle_len + 1));
+          if (str == NULL) {
+            goto exit;  
+          }
+
+          // move haystack start pointer to str
+          *haystack = str;
+          str = *haystack + offset; 
+  }
+    memmove(str + sub_len, str + needle_len, haystack_len + 1 - offset - needle_len);  
+    memcpy(str, substitute, sub_len);
+    haystack_len = haystack_len + sub_len - needle_len; 
+    str += sub_len; 
+  }
+  str = *haystack;
+
+  // CASE 2: Replacement string is shorter than needle size 
+  // shrink haystack size
+  if (sub_len < needle_len) {
+    str = realloc(*haystack, sizeof ** haystack * (haystack_len+1));
+    if (str == NULL) {
+      goto exit; 
+    }
+    *haystack = str; 
+  }
+  
+exit: 
+  return str; 
+}
+
