@@ -24,6 +24,9 @@ static char *str_substitute(char *restrict *restrict haystack, char const *restr
 // function to word expansion
 static void perform_expansion(int elements, char *ptrArray[]);
 
+// function to manage background processes before taking user input
+static void manage_background_processes(); 
+
 
 int main(int argc, char *argv[]) {
 
@@ -40,17 +43,13 @@ int main(int argc, char *argv[]) {
   /* ************ INPUT *********************
    *  
    *  ---------------------------------------------------------
-   *  Input - Managing background processes (NEED TO INCLUDE)
-   *  ---------------------------------------------------------
-
+   *  Input - Managing background processes 
    *  check for un-waited-for-background processes in the same process group ID as smallsh
-   *  -----------------------------------------------------
+   *  ---------------------------------------------------------
    */
+  manage_background_processes(); 
 
-  char *expan_env = NULL;
-  expan_env = getenv("HOME");
-  printf("\nexpan_env is %s\n", expan_env); 
-
+  // ******************************************
 
   char* line2 = NULL;
   size_t n = 0;
@@ -287,7 +286,7 @@ exit:
 
 
 // check for unwaited-for-background processes
-void manage_background_processes() {
+static void manage_background_processes() {
 
   // get process group id of calling process..always sucess 
   pid_t currGroupId = getpgrp();
