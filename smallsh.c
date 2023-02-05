@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <stdint.h>
+#include <ctype.h>
 
 /* Convenient macro to get the length of an array (number of elements) */
 #define arrlen(a) (sizeof(a) / sizeof *(a))
@@ -28,7 +29,10 @@ static void perform_expansion(int elements, char *ptrArray[]);
 static void manage_background_processes();
 
 // SIGINT handler function
-static void handle_SIGINT(int signo); 
+static void handle_SIGINT(int signo);
+
+// custom exit() function
+void exit(int argc, char *argv[]);
 
 
 int main(int argc, char *argv[]) {
@@ -145,8 +149,8 @@ int main(int argc, char *argv[]) {
 
 exit: 
 
-     free(line);
-     return 0; 
+  free(line);
+  return 0; 
 }
 
 static void perform_expansion(int elements, char *ptrArray[]) {
@@ -368,4 +372,69 @@ static void handle_SIGINT(int signo){
   char* message = "SIGINT handler() called.\n";
   // We are using write rather than printf
   write(STDOUT_FILENO, message, 39);
+}
+
+
+void exit(int argc, char *argv[]) {
+
+  int exit_status = 0;
+
+  // get process group id of calling process..always sucess 
+  pid_t currGroupId = getpgrp();
+  pid_t childPID = 0;
+  int childStatus = 0;
+
+
+  // arg not provided
+  if (argc == 1) {
+    exit_status = atoi(getenv("$?"));
+  }
+
+  // too many args
+  else if (argc > 2) {
+    printf("Error, more than one argument provided...\n"); 
+  }
+
+  // arg provided is not an int 
+  else if (argc == 2) {
+    int i = 0;
+
+    // validate each input char is int
+    for (i = 0; argv[1][i] != '\0'; i++) {
+      if (isdigit(argv[1][i]) == 0) {
+        printf("Error, argument provided is not an integer"); 
+      }
+    }
+
+    // if success, set arg as exit status
+    exit_status = atoi(argv[1]); 
+  }
+
+  // print exit to stderr
+  fprintf(stderr, "\nexit\n");
+
+  // kill child processes in process group id w/ SIGINT.. don't wait using WNOHANG
+  while ((childPID = waitpid(-1, &childStatus, WNOHANG)) > 0) {
+
+    pid_t childPGID = getpgid(childPID);
+
+    if (childPGID == -1) {
+      perror("There was an error calling getpgid().\n"); 
+    }
+    // check if child process group id of current child process == parent process group id
+    if (getpgid(childPID) == currGroupId) {
+
+      int killStatus = 0;
+
+      // if SIGCONT kill() fails
+      if ((killStatus = kill(childPID, SIGINT)) == -1) {
+        perror("kill() failed with the childPID.\n"); 
+      }
+
+    }
+
+  }
+
+  exit(exit_status); 
+
 }
