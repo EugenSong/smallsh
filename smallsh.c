@@ -25,7 +25,10 @@ static char *str_substitute(char *restrict *restrict haystack, char const *restr
 static void perform_expansion(int elements, char *ptrArray[]);
 
 // function to manage background processes before taking user input
-static void manage_background_processes(); 
+static void manage_background_processes();
+
+// SIGINT handler function
+static void handle_SIGINT(int signo); 
 
 
 int main(int argc, char *argv[]) {
@@ -38,12 +41,30 @@ int main(int argc, char *argv[]) {
   size_t buff_size = 0;
   ssize_t bytes_read;  // later: maybe move into main infinite loop like example
 
-  char *ptrArray[512]; 
+  char *ptrArray[512];
 
-  /* ************ INPUT *********************
-   *  
-   *  ---------------------------------------------------------
-   *  Input - Managing background processes 
+  /* -------------------------------------------- */ 
+  /*  SIGINT & SIGTSTP signal set-up (done) */
+  /* --------------------------------------------- */
+  struct sigaction SIGINT_action = {0}, ignore_action = {0};
+  // Register handle_SIGINT as the signal handler
+  SIGINT_action.sa_handler = handle_SIGINT;
+  // Block all catchable signals while handle_SIGINT is running
+  sigfillset(&SIGINT_action.sa_mask);
+  // No flags set
+  SIGINT_action.sa_flags = 0;
+
+  // give SIGINT a signal handler at the start when user is prompted 
+  sigaction(SIGINT, &SIGINT_action, NULL);
+
+  // Set SIGTSTP's action part of ignore_action struct -- SIG_IGN as its signal handler
+  ignore_action.sa_handler = SIG_IGN;
+  sigaction(SIGTSTP, &ignore_action, NULL);
+
+
+  /* ************ INPUT ********************* */
+  /*  ---------------------------------------------------------
+   *  Input - Managing background processes (Done) 
    *  check for un-waited-for-background processes in the same process group ID as smallsh
    *  ---------------------------------------------------------
    */
@@ -81,8 +102,7 @@ int main(int argc, char *argv[]) {
 
   /*
    * ------------------------------------------------
-   * Input - Reading a line of input (Almost done)
-   * ...include more on reading interrupted by signal...clearerr(3)
+   * Input - Reading a line of input (Done)
    * ------------------------------------------------
    */
 
@@ -90,7 +110,11 @@ int main(int argc, char *argv[]) {
   bytes_read = getline(&line, &buff_size, fp);
 
   if (bytes_read == -1) {
-    perror("Getline() failed."); 
+    perror("Getline() failed.");
+    clearerr(stdin);
+    putchar('\n'); 
+    // continue; 
+
     /* check for signal interruptions (signal handling) --> print newline and
      * spawn new command prompt (check for background processes) --> continue input line read
      */
@@ -98,6 +122,11 @@ int main(int argc, char *argv[]) {
   else {
     printf("\nRead number of bytes from getline(): %zd\n", bytes_read);
   }
+
+  // reset SIGINT to be ignored throughout program EXCEPT @ getline() 
+  sigaction(SIGINT, &ignore_action, NULL); 
+
+
 
   // split words
   split_word(elements, line, ptrArray);
@@ -114,13 +143,10 @@ int main(int argc, char *argv[]) {
 
 
 
+exit: 
 
-
-  free(line);
-
-
-
-  return 0; 
+     free(line);
+     return 0; 
 }
 
 static void perform_expansion(int elements, char *ptrArray[]) {
@@ -190,7 +216,7 @@ static int split_word(int elements, char *input, char *ptrArray[]) {
   ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof (*ptrArray));
 
   if (ptrArray[index] == NULL) {
-    perror("mallloc failed, exiting...");
+    perror("mallloc failed, exiting...\n");
     exit(1); 
   }
 
@@ -211,7 +237,7 @@ static int split_word(int elements, char *input, char *ptrArray[]) {
     ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof (*ptrArray));
 
     if (ptrArray[index] == NULL) {
-      perror("mallloc failed, exiting...");
+      perror("mallloc failed, exiting...\n");
       exit(1); 
     }
 
@@ -304,7 +330,7 @@ static void manage_background_processes() {
     pid_t childPGID = getpgid(childPID);
 
     if (childPGID == -1) {
-      perror("There was an error calling getpgid()"); 
+      perror("There was an error calling getpgid().\n"); 
     }
     // check if child process group id of current child process == parent process group id
     if (getpgid(childPID) == currGroupId) {
@@ -327,7 +353,7 @@ static void manage_background_processes() {
 
         // if SIGCONT kill() fails
         if ((killStatus = kill(childPID, SIGCONT)) == -1) {
-          perror("kill() failed with the childPID"); 
+          perror("kill() failed with the childPID.\n"); 
         }
         fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t) childPID); 
       }
@@ -335,6 +361,11 @@ static void manage_background_processes() {
       // other state changes: ignore 
     }
   }
+}
 
-
+/* Our signal handler for SIGINT */
+static void handle_SIGINT(int signo){
+  char* message = "SIGINT handler() called.\n";
+  // We are using write rather than printf
+  write(STDOUT_FILENO, message, 39);
 }
