@@ -23,21 +23,29 @@ static int split_word(int elements, char *input, char *ptrArray[]);
 static char *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict substitute); 
 
 // function to word expansion
-static void perform_expansion(int elements, char *ptrArray[]);
+static void perform_expansion(pid_t backgroundProcessId, int exitStatusForeground, int elements, char *ptrArray[]);
 
-// function to manage background processes before taking user input
+// function to check for unwaited-for-background processes before taking user input 
 static void manage_background_processes();
 
 // SIGINT handler function
 static void handle_SIGINT(int signo);
 
-// custom exit() function
-void exit(int argc, char *argv[]);
+// function to print prompt
+static void print_prompt(char *ps1_env);
+
+// function to parse & tokenize user input 
+static void parse_user_input(int elements, char *ptrArray[]);
+
+
 
 
 int main(int argc, char *argv[]) {
 
-  char *env_name = NULL;
+  int exitStatusForeground = 0;
+  pid_t backgroundProcessId = -100;
+
+  char *ps1_env = NULL;
   int elements = 0;
 
   FILE *fp = stdin;
@@ -76,55 +84,31 @@ int main(int argc, char *argv[]) {
 
   // ******************************************
 
-  char* line2 = NULL;
-  size_t n = 0;
-  getline(&line2, &n, stdin);
-  {
-    char *ret = str_substitute(&line2, argv[1], argv[2]); 
-    if (!ret) exit(1); 
-    line2 = ret;
-  }
-  printf("%s", line2); 
-
-  free(line2); 
-
-
-
 
 
 
   // ------ Testing portion (above ^^^^ ) -------- Top of code starts below (vvvvv) --------
 
-  /*  --------------------------------
-   *  Input - The prompt (DONE)
-   *  --------------------------------
-   */
+  /*  ----  Input - The prompt (DONE) ------ */
+  print_prompt(ps1_env);
 
-  // expand PS1 environment variable | fprintf() prints to desig stream
-  env_name = getenv("PS1");
-  fprintf(stderr, "%s",env_name);
+  /* ------ Input - Reading a line of input (Done) ------------------ */
 
-  /*
-   * ------------------------------------------------
-   * Input - Reading a line of input (Done)
-   * ------------------------------------------------
-   */
-
-  // read a line of input from stdin [getline(3)]
+  // read input from stdin
   bytes_read = getline(&line, &buff_size, fp);
 
+  // signal interrupt or getline() fail...reset errno and  
   if (bytes_read == -1) {
-    perror("Getline() failed.");
+    perror("Getline() failed.\n");
     clearerr(stdin);
+    errno = 0;
     putchar('\n'); 
-    // continue; 
+    // continue; /* reset command prompt */ 
 
-    /* check for signal interruptions (signal handling) --> print newline and
-     * spawn new command prompt (check for background processes) --> continue input line read
-     */
   }
   else {
     printf("\nRead number of bytes from getline(): %zd\n", bytes_read);
+    printf("Moving onto word_splitting...\n"); 
   }
 
   // reset SIGINT to be ignored throughout program EXCEPT @ getline() 
@@ -133,18 +117,25 @@ int main(int argc, char *argv[]) {
 
 
   // split words
-  split_word(elements, line, ptrArray);
+  elements = split_word(elements, line, ptrArray);
 
 
-
-  // parsing needs to happen before expansion
-
-
+  printf("Size of elements after split_word and before perform_expansion: %d\n", elements); 
 
 
   // perform expansion 
+  perform_expansion(backgroundProcessId, exitStatusForeground, elements, ptrArray);
 
+  // print the ptrArray
+  for (int j = 0; j < elements; j++) {
+    printf("%s\n", ptrArray[j]); 
+  }
 
+  
+
+  // parse tokenized input 
+
+  parse_user_input(elements, ptrArray);
 
 
 exit: 
@@ -153,7 +144,42 @@ exit:
   return 0; 
 }
 
-static void perform_expansion(int elements, char *ptrArray[]) {
+
+static void parse_user_input(int elements, char *ptrArray[]) {
+  
+  int commentIndex = -17;
+  for (int counter = 0; counter < elements; counter++) {
+
+    // look for # (comment token) ... stop looking
+    if (strcmp(ptrArray[counter], "#") == 0) {
+      commentIndex = counter;
+      break;
+    }
+
+
+  }
+
+
+
+}
+
+
+
+static void print_prompt(char *ps1_env) {
+  // expand PS1 environment variable.. unset -> "" | fprintf(stderr, _) prints to stderr
+  ps1_env = getenv("PS1");
+  if (ps1_env == NULL) { ps1_env = ""; }
+  fprintf(stderr, "%s",ps1_env);
+
+}
+
+static void perform_expansion(pid_t backgroundProcessId, int exitStatusForeground, int elements, char *ptrArray[]) {
+
+
+
+
+  char exit_str[10];
+  char process_id[10];
 
   char temp[50];
   char *expan_env = NULL;
@@ -170,6 +196,9 @@ static void perform_expansion(int elements, char *ptrArray[]) {
 
       // bullet point 1: “~/” at the beginning of a word shall be replaced with the value of the HOME environment variable
       if (strncmp(ptrArray[i], "~/", 2) == 0) {
+        if (expan_env == NULL) {
+          expan_env = ""; 
+        }
         str_substitute(&ptrArray[i], "~", expan_env);
       }
 
@@ -183,10 +212,17 @@ static void perform_expansion(int elements, char *ptrArray[]) {
       str_substitute(&ptrArray[i], "$$", temp); 
 
       // bullet point 3: occurrence of “$?” within a word shall be replaced with the exit status of the last foreground command (see waiting)
-
+      sprintf(exit_str, "%d", exitStatusForeground);
+      str_substitute(&ptrArray[i], "$?", exit_str); 
 
       // bullet point 4: occurrence of “$!” within a word shall be replaced with the process ID of the most recent background process (see waiting)
-
+      if (backgroundProcessId == -110) {
+        str_substitute(&ptrArray[i], "$!", ""); 
+      }
+      else {
+        sprintf(process_id, "%d", backgroundProcessId);
+        str_substitute(&ptrArray[i], "$!", process_id);
+      }
 
     }
 
@@ -226,6 +262,7 @@ static int split_word(int elements, char *input, char *ptrArray[]) {
 
   strcpy(ptrArray[index], copy);
   free(copy);
+  elements++;
 
   for (;;) {
 
@@ -257,8 +294,11 @@ static int split_word(int elements, char *input, char *ptrArray[]) {
     printf("%s\n", ptrArray[j]); 
   }
 
-  printf("Done splitting word and printing tokens.\n"); 
-  return 0; 
+  printf("Done splitting word and printing tokens.\n");
+
+  printf("Number of elements from split_word is: %d\n", elements); 
+
+  return elements;  
 
   // don't forget to free(ptrArray[index] after finishing !!
 }
@@ -315,11 +355,10 @@ exit:
 }
 
 
-// check for unwaited-for-background processes
 static void manage_background_processes() {
 
   // get process group id of calling process..always sucess 
-  pid_t currGroupId = getpgrp();
+  // pid_t currGroupId = getpgrp();
   pid_t childPID = 0;
   int childStatus = 0;
 
@@ -329,41 +368,47 @@ static void manage_background_processes() {
   //      0 --> child process executes chunk 
   //      > 0 --> child process PID 
 
-  while ((childPID = waitpid(-1, &childStatus, WNOHANG | WUNTRACED)) > 0) {
+  while ((childPID = waitpid(0, &childStatus, WNOHANG | WUNTRACED)) > 0) {
 
-    pid_t childPGID = getpgid(childPID);
+    /*pid_t childPGID = getpgid(childPID);
 
-    if (childPGID == -1) {
+      if (childPGID == -1) {
       perror("There was an error calling getpgid().\n"); 
-    }
+      }
     // check if child process group id of current child process == parent process group id
     if (getpgid(childPID) == currGroupId) {
 
-      // if exited normally 
-      if (WIFEXITED(childStatus)) {
-        int exitStatus = WEXITSTATUS(childStatus);
-        fprintf(stderr, "Child process %jd done. Exit status %d.\n", (intmax_t) childPID, exitStatus);
-      }
+*/
 
-      // if signaled
-      else if (WIFSIGNALED(childStatus)) {
-        int signalNumber = WTERMSIG(childStatus);
-        fprintf(stderr, "Child process %jd done. Signaled %d.\n", (intmax_t) childPID, signalNumber);
-      }
-
-      // if stopped 
-      else if (WIFSTOPPED(childStatus)) {
-        int killStatus = 0;
-
-        // if SIGCONT kill() fails
-        if ((killStatus = kill(childPID, SIGCONT)) == -1) {
-          perror("kill() failed with the childPID.\n"); 
-        }
-        fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t) childPID); 
-      }
-
-      // other state changes: ignore 
+    // if exited normally 
+    if (WIFEXITED(childStatus)) {
+      int exitStatus = WEXITSTATUS(childStatus);
+      fprintf(stderr, "Child process %jd done. Exit status %d.\n", (intmax_t) childPID, exitStatus);
     }
+
+    // if signaled
+    else if (WIFSIGNALED(childStatus)) {
+      int signalNumber = WTERMSIG(childStatus);
+      fprintf(stderr, "Child process %jd done. Signaled %d.\n", (intmax_t) childPID, signalNumber);
+    }
+
+    // if stopped 
+    else if (WIFSTOPPED(childStatus)) {
+      int killStatus = 0;
+
+      // if SIGCONT kill() fails
+      if ((killStatus = kill(childPID, SIGCONT)) == -1) {
+        perror("kill() failed with the childPID.\n"); 
+      }
+      fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t) childPID); 
+    }
+
+    // other state changes: ignore 
+    // }
+  }
+
+  if (childPID < 0) {
+    perror("Either no existing background processes or no more. waitpid() fails and returns...");  
   }
 }
 
@@ -374,67 +419,69 @@ static void handle_SIGINT(int signo){
   write(STDOUT_FILENO, message, 39);
 }
 
+/*
+   void exit(int argc, char *argv[]) {
 
-void exit(int argc, char *argv[]) {
+   int exit_status = 0;
 
-  int exit_status = 0;
-
-  // get process group id of calling process..always sucess 
-  pid_t currGroupId = getpgrp();
-  pid_t childPID = 0;
-  int childStatus = 0;
+// get process group id of calling process..always sucess 
+pid_t currGroupId = getpgrp();
+pid_t childPID = 0;
+int childStatus = 0;
 
 
-  // arg not provided
-  if (argc == 1) {
-    exit_status = atoi(getenv("$?"));
-  }
+// arg not provided
+if (argc == 1) {
+exit_status = atoi(getenv("$?"));
+}
 
-  // too many args
-  else if (argc > 2) {
-    printf("Error, more than one argument provided...\n"); 
-  }
+// too many args
+else if (argc > 2) {
+printf("Error, more than one argument provided...\n"); 
+}
 
-  // arg provided is not an int 
-  else if (argc == 2) {
-    int i = 0;
+// arg provided is not an int 
+else if (argc == 2) {
+int i = 0;
 
-    // validate each input char is int
-    for (i = 0; argv[1][i] != '\0'; i++) {
-      if (isdigit(argv[1][i]) == 0) {
-        printf("Error, argument provided is not an integer"); 
-      }
-    }
+// validate each input char is int
+for (i = 0; argv[1][i] != '\0'; i++) {
+if (isdigit(argv[1][i]) == 0) {
+printf("Error, argument provided is not an integer"); 
+}
+}
 
-    // if success, set arg as exit status
-    exit_status = atoi(argv[1]); 
-  }
+// if success, set arg as exit status
+exit_status = atoi(argv[1]); 
+}
 
-  // print exit to stderr
-  fprintf(stderr, "\nexit\n");
+// print exit to stderr
+fprintf(stderr, "\nexit\n");
 
-  // kill child processes in process group id w/ SIGINT.. don't wait using WNOHANG
-  while ((childPID = waitpid(-1, &childStatus, WNOHANG)) > 0) {
+// kill child processes in process group id w/ SIGINT.. don't wait using WNOHANG
+while ((childPID = waitpid(-1, &childStatus, WNOHANG)) > 0) {
 
-    pid_t childPGID = getpgid(childPID);
+pid_t childPGID = getpgid(childPID);
 
-    if (childPGID == -1) {
-      perror("There was an error calling getpgid().\n"); 
-    }
-    // check if child process group id of current child process == parent process group id
-    if (getpgid(childPID) == currGroupId) {
+if (childPGID == -1) {
+perror("There was an error calling getpgid().\n"); 
+}
+// check if child process group id of current child process == parent process group id
+if (getpgid(childPID) == currGroupId) {
 
-      int killStatus = 0;
+int killStatus = 0;
 
-      // if SIGCONT kill() fails
-      if ((killStatus = kill(childPID, SIGINT)) == -1) {
-        perror("kill() failed with the childPID.\n"); 
-      }
-
-    }
-
-  }
-
-  exit(exit_status); 
+// if SIGCONT kill() fails
+if ((killStatus = kill(childPID, SIGINT)) == -1) {
+perror("kill() failed with the childPID.\n"); 
+}
 
 }
+
+}
+
+exit(exit_status); 
+
+}
+
+*/
