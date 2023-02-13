@@ -37,7 +37,8 @@ static void print_prompt(char *ps1_env);
 // function to parse & tokenize user input 
 static void parse_user_input(char *outFile, char *inFile, int *runInBackground, int elements, char *ptrArray[]);
 
-
+// function to print the char * []
+static void print_array(int elements, char* ptrArray[]);
 
 
 int main(int argc, char *argv[]) {
@@ -131,12 +132,7 @@ int main(int argc, char *argv[]) {
   perform_expansion(backgroundProcessId, exitStatusForeground, elements, ptrArray);
 
   // print the ptrArray
-  for (int j = 0; j < elements; j++) {
-    printf("%s\n", ptrArray[j]); 
-  }
-
-
-
+  print_array(elements, ptrArray);  
   // parse tokenized input 
 
   printf("\nParsing user input:\n"); 
@@ -147,6 +143,18 @@ exit:
 
   free(line);
   return 0; 
+}
+
+static void print_array(int elements, char *ptrArray[]) {
+  // print the ptrArray
+  for (int j = 0; j < elements; j++) {
+    if (ptrArray[j] == NULL) {
+      printf("index %d is NULL\n", j); 
+    }
+    else {
+      printf("%s\n", ptrArray[j]); 
+    }
+  }
 }
 
 
@@ -270,11 +278,7 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
     }
   }
 
-        // print the ptrArray
-  for (int j = 0; j < elements; j++) {
-    printf("%s\n", ptrArray[j]); 
-  }
-
+  print_array(elements, ptrArray);  
 }
 
 
@@ -303,7 +307,8 @@ static void perform_expansion(pid_t backgroundProcessId, int exitStatusForegroun
   int i = 0;
   printf("size of ptrArray is %d\n", elements);
 
-  while (i < elements) {
+  // elements - 1 to disregard the NULL pointer @ the end 
+  while (i < elements-1) {
 
     // ensure each token is >= size 2
     if (strlen(ptrArray[i]) >= 2) {
@@ -386,8 +391,13 @@ static int split_word(int elements, char *input, char *ptrArray[]) {
     token = strtok(NULL, ifs_env);
     printf("Next Token =%s\n", token); 
 
-    if (token == NULL) { break;}
-   
+    if (token == NULL) { 
+      ptrArray[index] = (char*) malloc(sizeof(*ptrArray)); 
+      ptrArray[index] = token;
+      elements++; 
+      printf("NULL TOKEN IS INSERTED\n"); 
+      break;}
+
     copy = strdup(token);
 
     ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof (*ptrArray));
@@ -403,17 +413,10 @@ static int split_word(int elements, char *input, char *ptrArray[]) {
   }
 
 
-
   printf("The strings are:\n");
 
   // print the ptrArray
-  for (int j = 0; j < index; j++) {
-
-    if (ptrArray[j] == NULL) {
-      printf("index %d is NULL", j); 
-    }
-    printf("%s\n", ptrArray[j]); 
-  }
+  print_array(elements, ptrArray);  
 
   printf("Done splitting word and printing tokens.\n");
 
