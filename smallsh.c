@@ -40,6 +40,12 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
 // function to print the char * []
 static void print_array(int elements, char* ptrArray[]);
 
+// function when built-in exit() called
+static void exit_called(int elements, int exitStatusForeground, char* ptrArray[]);
+
+// function when built-in cd() called 
+static void cd_called(int elements, char *ptrArray[]);
+
 
 int main(int argc, char *argv[]) {
 
@@ -131,12 +137,20 @@ int main(int argc, char *argv[]) {
   // perform expansion 
   perform_expansion(backgroundProcessId, exitStatusForeground, elements, ptrArray);
 
-  // print the ptrArray
-  print_array(elements, ptrArray);  
-  // parse tokenized input 
+  print_array(elements, ptrArray); 
 
+  // parse tokenized input 
   printf("\nParsing user input:\n"); 
   parse_user_input(outFile, inFile, &runInBackground, elements, ptrArray);
+
+
+  /* At this point, ptrArray is updated w/ the Parsed/Expanded tokens... inFile + outFile updated*/
+
+  // check if exit or cd commands 
+  exit_called(elements, exitStatusForeground, ptrArray);
+  cd_called(elements, ptrArray);
+
+  /* next task: work on Non-builtin commands */ 
 
 
 exit: 
@@ -167,7 +181,7 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
       continue; 
     }
 
-    printf("parse_user_input has gone past the continue"); 
+    printf("parse_user_input is processing...continue iterations done...\n"); 
 
     //  # (comment token) found ... stop looking
     if (strcmp(ptrArray[counter], "#") == 0) {
@@ -227,7 +241,7 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
     // wordlist pointer reached the end w/o encountering a comment (#)
     else if (counter == elements-2) {
 
-      printf("counter == elements-2 reached\n"); 
+      printf("counter == elements-2 (aka end of line before NULL) reached\n"); 
 
       if (counter >= 0) {
 
@@ -325,8 +339,6 @@ static void print_prompt(char *ps1_env) {
 }
 
 static void perform_expansion(pid_t backgroundProcessId, int exitStatusForeground, int elements, char *ptrArray[]) {
-
-
 
 
   char exit_str[10];
@@ -576,69 +588,131 @@ static void handle_SIGINT(int signo){
   write(STDOUT_FILENO, message, 39);
 }
 
-/*
-   void exit(int argc, char *argv[]) {
-
-   int exit_status = 0;
-
-// get process group id of calling process..always sucess 
-pid_t currGroupId = getpgrp();
-pid_t childPID = 0;
-int childStatus = 0;
+static void cd_called(int elements, char *ptrArray[]) {
 
 
-// arg not provided
-if (argc == 1) {
-exit_status = atoi(getenv("$?"));
-}
+  char *home_env = getenv("HOME"); 
 
-// too many args
-else if (argc > 2) {
-printf("Error, more than one argument provided...\n"); 
-}
+  // printf("The old string before / is %s\n", home_env); 
 
-// arg provided is not an int 
-else if (argc == 2) {
-int i = 0;
+  // expand home env 
+  int new_len = strlen(home_env) + 2;
+  char *back_slash = malloc(new_len * sizeof(char)); 
+  back_slash[0] = '/';
+  strcat(home_env, back_slash);
+  // printf("The new string after / is %s\n", home_env); 
+  free(back_slash); 
 
-// validate each input char is int
-for (i = 0; argv[1][i] != '\0'; i++) {
-if (isdigit(argv[1][i]) == 0) {
-printf("Error, argument provided is not an integer"); 
-}
-}
+  if (strcmp(ptrArray[0], "cd") == 0) {
 
-// if success, set arg as exit status
-exit_status = atoi(argv[1]); 
-}
+    // no args provided... `cd NULL`
+    if (elements == 2) {
+      if (chdir(home_env) == 0) { printf("chdir success\n"); }
+      else { perror("chdir() failed..."); }
+    }
 
-// print exit to stderr
-fprintf(stderr, "\nexit\n");
+    // more than 1 arg provided... `cd arg1 arg2 NULL` 
+    else if (elements >3) {
+      fprintf(stderr, "Failure..More than one arg provided to cd()\n"); 
+      goto door;
+    }
 
-// kill child processes in process group id w/ SIGINT.. don't wait using WNOHANG
-while ((childPID = waitpid(-1, &childStatus, WNOHANG)) > 0) {
+    // good len... `cd arg NULL`
+    else {
 
-pid_t childPGID = getpgid(childPID);
-
-if (childPGID == -1) {
-perror("There was an error calling getpgid().\n"); 
-}
-// check if child process group id of current child process == parent process group id
-if (getpgid(childPID) == currGroupId) {
-
-int killStatus = 0;
-
-// if SIGCONT kill() fails
-if ((killStatus = kill(childPID, SIGINT)) == -1) {
-perror("kill() failed with the childPID.\n"); 
-}
+      if (chdir(ptrArray[1]) == 0) { printf("chdir success\n"); }
+      else { perror("chdir() failed in else block.. good len args"); }
+    }
+  }
+door:
+  printf("cd_called door() reached"); 
 
 }
 
+
+static void exit_called(int elements, int exitStatusForeground, char *ptrArray[]) {
+
+  int isAnInt = 2;
+  int exit_val = -1111;
+
+  // get process group id of calling process..always sucess 
+  pid_t currGroupId = getpgrp();
+  pid_t childPID = 0;
+  int childStatus = 0;
+
+
+  if (strcmp(ptrArray[0], "exit") == 0) {
+
+    // no arg provided ... `exit (NULL)`
+    if (elements == 2) {
+      exit_val = exitStatusForeground;
+      fprintf(stderr, "\nexit\n");
+
+      // kill child processes in process group id w/ SIGINT.. don't wait using WNOHANG
+      while ((childPID = waitpid(-1, &childStatus, WNOHANG)) > 0) {
+        pid_t childPGID = getpgid(childPID);
+        if (childPGID == -1) {
+          perror("There was an error calling getpgid().\n"); 
+        }
+        // check if child process group id of current child process == parent process group id
+        if (getpgid(childPID) == currGroupId) {
+          int killStatus = 0;
+          // if SIGCONT kill() fails
+          if ((killStatus = kill(childPID, SIGINT)) == -1) {
+            perror("kill() failed with the childPID.\n"); 
+          }
+        }
+      }
+      exit(exit_val);
+    }
+    // more than 1 arg is provided... `exit arg1 arg2 (NULL)`
+    else if (elements > 3) {
+      fprintf(stderr, "Too many arguments provided to exit()...\n"); 
+      goto door;
+    }
+    // good len... `exit arg (NULL)`
+    else if (elements == 3) {
+      // check if 2nd arg is an int or not
+      for (int i = 0; ptrArray[1][i] != '\0'; i++) {
+        printf("running in the for loop when elem == 3\n");
+        printf("char is %c\n", ptrArray[1][i]); 
+        if (isdigit(ptrArray[1][i]) == 0) {
+          printf("Not an int\n"); 
+          isAnInt = -2;
+          fprintf(stderr, "Argument passed into exit() is not an int..\n");
+          break;
+        }
+      }
+
+      // arg is not int --> leave func call 
+      if (isAnInt == -2) { goto door; }
+
+      // arg is int
+      else if (isAnInt == 2) {
+
+        exit_val = atoi(ptrArray[1]);
+        fprintf(stderr, "\nexit\n");
+
+        // kill child processes in process group id w/ SIGINT.. don't wait using WNOHANG
+        while ((childPID = waitpid(-1, &childStatus, WNOHANG)) > 0) {
+          pid_t childPGID = getpgid(childPID);
+          if (childPGID == -1) {
+            perror("There was an error calling getpgid().\n"); 
+          }
+          // check if child process group id of current child process == parent process group id
+          if (getpgid(childPID) == currGroupId) {
+            int killStatus = 0;
+            // if SIGCONT kill() fails
+            if ((killStatus = kill(childPID, SIGINT)) == -1) {
+              perror("kill() failed with the childPID.\n"); 
+            }
+          }
+        }
+      }
+      exit(exit_val);
+    }
+door:
+    printf("Door reached"); 
+  }
 }
 
-exit(exit_status); 
-
-}
-
-*/
