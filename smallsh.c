@@ -35,13 +35,17 @@ static void handle_SIGINT(int signo);
 static void print_prompt(char *ps1_env);
 
 // function to parse & tokenize user input 
-static void parse_user_input(int elements, char *ptrArray[]);
+static void parse_user_input(char *outFile, char *inFile, int *runInBackground, int elements, char *ptrArray[]);
 
 
 
 
 int main(int argc, char *argv[]) {
 
+  char *outFile = NULL;
+  char *inFile = NULL; 
+
+  int runInBackground = 0;
   int exitStatusForeground = 0;
   pid_t backgroundProcessId = -100;
 
@@ -131,11 +135,12 @@ int main(int argc, char *argv[]) {
     printf("%s\n", ptrArray[j]); 
   }
 
-  
+
 
   // parse tokenized input 
 
-  parse_user_input(elements, ptrArray);
+  printf("\nParsing user input:\n"); 
+  parse_user_input(outFile, inFile, &runInBackground, elements, ptrArray);
 
 
 exit: 
@@ -145,21 +150,130 @@ exit:
 }
 
 
-static void parse_user_input(int elements, char *ptrArray[]) {
-  
-  int commentIndex = -17;
+static void parse_user_input(char *outFile, char *inFile, int *runInBackground, int elements, char *ptrArray[]) {
+
   for (int counter = 0; counter < elements; counter++) {
 
-    // look for # (comment token) ... stop looking
+    // iterate through wordlist til end of line or till # is encountered
+    if (counter != elements-1 && strcmp(ptrArray[counter], "#") != 0) {
+      continue; 
+    }
+
+    printf("parse_user_input has gone past the continue"); 
+
+    //  # (comment token) found ... stop looking
     if (strcmp(ptrArray[counter], "#") == 0) {
-      commentIndex = counter;
+      free(ptrArray[counter]); 
+      ptrArray[counter] = NULL; 
+
+      // "&" exists behind "#" (comment)  
+      if (counter-1 >= 0) {
+        if (strcmp(ptrArray[counter-1], "&") == 0) {
+          free(ptrArray[counter-1]);
+          ptrArray[counter-1] = NULL; 
+          *runInBackground = 2;
+        }
+        // check for "<" before & - input redirection operator
+        if (counter-3 >= 0) {
+
+          if (strcmp(ptrArray[counter-3], "<") == 0) {
+            inFile = ptrArray[counter-2];
+            free(ptrArray[counter-3]);
+            ptrArray[counter-3] = NULL;
+
+            // if "> output_file" exists before the "<"
+            if (counter-5 >= 0) {
+              if (strcmp(ptrArray[counter-5], ">") == 0) {
+                outFile = ptrArray[counter-4];
+                free(ptrArray[counter-5]); 
+                ptrArray[counter-5] = NULL;
+              }
+            }
+            break;
+          }
+
+          // check for ">" before & - output redirection operator
+          else if (strcmp(ptrArray[counter-3], ">") == 0) {
+            outFile = ptrArray[counter-2];
+            free(ptrArray[counter-3]);
+            ptrArray[counter-3] = NULL; 
+
+            if (counter-5 >= 0) {
+              if (strcmp(ptrArray[counter-5], "<") == 0) {
+                inFile = ptrArray[counter-4];
+                free(ptrArray[counter-5]); 
+                ptrArray[counter-5] = NULL;
+              }
+            }
+            break; 
+          }
+        }
+        break; 
+      }
       break;
     }
 
 
+    // wordlist pointer reached the end w/o encountering a comment (#)
+    else if (counter == elements-1) {
+
+      printf("counter == elements-1 reached\n"); 
+
+      // "&" exists behind NULL   
+      if (counter-1 >= 0) {
+        if (strcmp(ptrArray[counter-1], "&") == 0) {
+          free(ptrArray[counter-1]);
+          ptrArray[counter-1] = NULL; 
+          *runInBackground = 2;
+        }
+      }
+
+      // check for "<" before & - input redirection operator
+      if (counter-2 >= 0) {
+        if (strcmp(ptrArray[counter-2], "<") == 0) {
+          inFile = ptrArray[counter-1];
+          free(ptrArray[counter-2]);
+          ptrArray[counter-2] = NULL;
+
+          // if "> output_file" exists before the "<"
+          if (counter-4 >= 0) {
+            if (strcmp(ptrArray[counter-4], ">") == 0) {
+              outFile = ptrArray[counter-3];
+              free(ptrArray[counter-4]); 
+              ptrArray[counter-4] = NULL;
+            }
+
+            break;
+          }
+          break;
+        }
+
+        // check for ">" before & - output redirection operator
+        else if (strcmp(ptrArray[counter-2], ">") == 0) {
+          outFile = ptrArray[counter-1];
+          free(ptrArray[counter-2]);
+          ptrArray[counter-2] = NULL; 
+
+          if (counter-4 >= 0) {
+            if (strcmp(ptrArray[counter-4], "<") == 0) {
+              inFile = ptrArray[counter-3];
+              free(ptrArray[counter-4]); 
+              ptrArray[counter-4] = NULL;
+              break;
+            }
+          }
+          break;
+        }
+        break; 
+      }
+      break; 
+    }
   }
 
-
+        // print the ptrArray
+  for (int j = 0; j < elements; j++) {
+    printf("%s\n", ptrArray[j]); 
+  }
 
 }
 
@@ -273,8 +387,9 @@ static int split_word(int elements, char *input, char *ptrArray[]) {
     printf("Next Token =%s\n", token); 
 
     if (token == NULL) { break;}
-
+   
     copy = strdup(token);
+
     ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof (*ptrArray));
 
     if (ptrArray[index] == NULL) {
@@ -287,10 +402,16 @@ static int split_word(int elements, char *input, char *ptrArray[]) {
     elements++; 
   }
 
+
+
   printf("The strings are:\n");
 
   // print the ptrArray
   for (int j = 0; j < index; j++) {
+
+    if (ptrArray[j] == NULL) {
+      printf("index %d is NULL", j); 
+    }
     printf("%s\n", ptrArray[j]); 
   }
 
