@@ -163,7 +163,7 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
   for (int counter = 0; counter < elements; counter++) {
 
     // iterate through wordlist til end of line or till # is encountered
-    if (counter != elements-1 && strcmp(ptrArray[counter], "#") != 0) {
+    if (counter != elements-2 && strcmp(ptrArray[counter], "#") != 0) {
       continue; 
     }
 
@@ -174,14 +174,16 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
       free(ptrArray[counter]); 
       ptrArray[counter] = NULL; 
 
-      // "&" exists behind "#" (comment)  
+      // check behind the #
       if (counter-1 >= 0) {
+
+        // "&" exists behind "#" (comment) ... this conditional check does not affect < / > checks below 
         if (strcmp(ptrArray[counter-1], "&") == 0) {
           free(ptrArray[counter-1]);
           ptrArray[counter-1] = NULL; 
           *runInBackground = 2;
         }
-        // check for "<" before & - input redirection operator
+        // check for "<" - input redirection operator
         if (counter-3 >= 0) {
 
           if (strcmp(ptrArray[counter-3], "<") == 0) {
@@ -189,7 +191,7 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
             free(ptrArray[counter-3]);
             ptrArray[counter-3] = NULL;
 
-            // if "> output_file" exists before the "<"
+            // check for "> - output_file redirection operator
             if (counter-5 >= 0) {
               if (strcmp(ptrArray[counter-5], ">") == 0) {
                 outFile = ptrArray[counter-4];
@@ -223,62 +225,93 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
 
 
     // wordlist pointer reached the end w/o encountering a comment (#)
-    else if (counter == elements-1) {
+    else if (counter == elements-2) {
 
-      printf("counter == elements-1 reached\n"); 
+      printf("counter == elements-2 reached\n"); 
 
-      // "&" exists behind NULL   
-      if (counter-1 >= 0) {
-        if (strcmp(ptrArray[counter-1], "&") == 0) {
-          free(ptrArray[counter-1]);
-          ptrArray[counter-1] = NULL; 
+      if (counter >= 0) {
+
+        // "&" exists behind NULL  
+        if (strcmp(ptrArray[counter], "&") == 0) {
+          free(ptrArray[counter]);
+          ptrArray[counter] = NULL; 
           *runInBackground = 2;
-        }
-      }
 
-      // check for "<" before & - input redirection operator
-      if (counter-2 >= 0) {
-        if (strcmp(ptrArray[counter-2], "<") == 0) {
-          inFile = ptrArray[counter-1];
-          free(ptrArray[counter-2]);
-          ptrArray[counter-2] = NULL;
 
-          // if "> output_file" exists before the "<"
-          if (counter-4 >= 0) {
-            if (strcmp(ptrArray[counter-4], ">") == 0) {
-              outFile = ptrArray[counter-3];
-              free(ptrArray[counter-4]); 
-              ptrArray[counter-4] = NULL;
+          // check for "<" before & - input redirection operator
+          if (counter-2 >= 0) {
+            if (strcmp(ptrArray[counter-2], "<") == 0) {
+              inFile = ptrArray[counter-1];
+              free(ptrArray[counter-2]);
+              ptrArray[counter-2] = NULL;
+
+              // if "> output_file" exists before the "<"
+              if (counter-4 >= 0) {
+                if (strcmp(ptrArray[counter-4], ">") == 0) {
+                  outFile = ptrArray[counter-3];
+                  free(ptrArray[counter-4]); 
+                  ptrArray[counter-4] = NULL;
+                }
+              }
             }
 
-            break;
+            // check for ">" before & - output redirection operator
+            else if (strcmp(ptrArray[counter-2], ">") == 0) {
+              outFile = ptrArray[counter-1];
+              free(ptrArray[counter-2]);
+              ptrArray[counter-2] = NULL; 
+
+              if (counter-4 >= 0) {
+                if (strcmp(ptrArray[counter-4], "<") == 0) {
+                  inFile = ptrArray[counter-3];
+                  free(ptrArray[counter-4]); 
+                  ptrArray[counter-4] = NULL;
+
+                }
+              }
+            }
+          }
+          break; 
+        }
+
+        // counter (aka end of wordlist) is not & after checking it's not a #
+        else {
+          if (counter-1 >= 0) {
+            if (strcmp(ptrArray[counter-1], "<") == 0) {
+              inFile = ptrArray[counter];
+              free(ptrArray[counter-1]);
+              ptrArray[counter-1] = NULL;
+
+              if (counter-3 >= 0) {
+                if (strcmp(ptrArray[counter-3], ">") == 0) {
+                  outFile = ptrArray[counter-2];
+                  free(ptrArray[counter-3]);
+                  ptrArray[counter-3] = NULL;
+                }
+              }
+            }
+
+            else if (strcmp(ptrArray[counter-1], ">") == 0) {
+              outFile = ptrArray[counter];
+              free(ptrArray[counter-1]);
+              ptrArray[counter-1] = NULL;
+
+              if (counter-3 >= 0) {
+                if (strcmp(ptrArray[counter-3], "<") == 0) {
+                  inFile = ptrArray[counter-2];
+                  free(ptrArray[counter-3]);
+                  ptrArray[counter-3] = NULL;
+                }
+              }
+            }
           }
           break;
         }
-
-        // check for ">" before & - output redirection operator
-        else if (strcmp(ptrArray[counter-2], ">") == 0) {
-          outFile = ptrArray[counter-1];
-          free(ptrArray[counter-2]);
-          ptrArray[counter-2] = NULL; 
-
-          if (counter-4 >= 0) {
-            if (strcmp(ptrArray[counter-4], "<") == 0) {
-              inFile = ptrArray[counter-3];
-              free(ptrArray[counter-4]); 
-              ptrArray[counter-4] = NULL;
-              break;
-            }
-          }
-          break;
-        }
-        break; 
       }
-      break; 
     }
   }
 
-  print_array(elements, ptrArray);  
+  print_array(elements, ptrArray);
 }
 
 
