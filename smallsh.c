@@ -12,6 +12,10 @@
 #include <signal.h>
 #include <stdint.h>
 #include <ctype.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+
 
 /* Convenient macro to get the length of an array (number of elements) */
 #define arrlen(a) (sizeof(a) / sizeof *(a))
@@ -44,7 +48,7 @@ static void print_array(int elements, char* ptrArray[]);
 static void exit_called(int elements, int exitStatusForeground, char* ptrArray[]);
 
 // function when built-in cd() called 
-static void cd_called(int elements, char *ptrArray[]);
+static int cd_called(int elements, char *ptrArray[]);
 
 
 int main(int argc, char *argv[]) {
@@ -66,10 +70,13 @@ int main(int argc, char *argv[]) {
 
   char *ptrArray[512];
 
+  pid_t mainChildPid = 0;
+  int mainChildStatus = 0;
+
   /* -------------------------------------------- */ 
   /*  SIGINT & SIGTSTP signal set-up (done) */
   /* --------------------------------------------- */
-  struct sigaction SIGINT_action = {0}, ignore_action = {0};
+  struct sigaction SIGINT_action = {0}, ignore_action = {0}, old_int_action = {0}, old_tstp_action = {0};
   // Register handle_SIGINT as the signal handler
   SIGINT_action.sa_handler = handle_SIGINT;
   // Block all catchable signals while handle_SIGINT is running
@@ -78,11 +85,11 @@ int main(int argc, char *argv[]) {
   SIGINT_action.sa_flags = 0;
 
   // give SIGINT a signal handler at the start when user is prompted 
-  sigaction(SIGINT, &SIGINT_action, NULL);
+  sigaction(SIGINT, &SIGINT_action, &old_int_action);
 
   // Set SIGTSTP's action part of ignore_action struct -- SIG_IGN as its signal handler
   ignore_action.sa_handler = SIG_IGN;
-  sigaction(SIGTSTP, &ignore_action, NULL);
+  sigaction(SIGTSTP, &ignore_action, &old_tstp_action);
 
 
   /* ************ INPUT ********************* */
@@ -91,73 +98,163 @@ int main(int argc, char *argv[]) {
    *  check for un-waited-for-background processes in the same process group ID as smallsh
    *  ---------------------------------------------------------
    */
-  manage_background_processes(); 
 
-  // ******************************************
+  for (;;) {
+    manage_background_processes(); 
 
+    /*  ----  Input - The prompt (DONE) ------ */
+    print_prompt(ps1_env);
 
+    /* ------ Input - Reading a line of input (Done) ------------------ */
 
+    // read input from stdin
+    bytes_read = getline(&line, &buff_size, fp);
 
-  // ------ Testing portion (above ^^^^ ) -------- Top of code starts below (vvvvv) --------
+    // signal interrupt or getline() fail...reset errno and  
+    if (bytes_read == -1) {
+      perror("Getline() failed.\n");
+      clearerr(stdin);
+      errno = 0;
+      putchar('\n'); 
+      continue; 
+    }
+    else {
+      printf("\nRead number of bytes from getline(): %zd\n", bytes_read);
+      printf("Moving onto word_splitting...\n"); 
+    }
 
-  /*  ----  Input - The prompt (DONE) ------ */
-  print_prompt(ps1_env);
+    // reset SIGINT to be ignored throughout program EXCEPT @ getline() 
+    sigaction(SIGINT, &ignore_action, NULL); 
 
-  /* ------ Input - Reading a line of input (Done) ------------------ */
+    // split words
+    elements = split_word(elements, line, ptrArray);
 
-  // read input from stdin
-  bytes_read = getline(&line, &buff_size, fp);
-
-  // signal interrupt or getline() fail...reset errno and  
-  if (bytes_read == -1) {
-    perror("Getline() failed.\n");
-    clearerr(stdin);
-    errno = 0;
-    putchar('\n'); 
-    // continue; /* reset command prompt */ 
-
-  }
-  else {
-    printf("\nRead number of bytes from getline(): %zd\n", bytes_read);
-    printf("Moving onto word_splitting...\n"); 
-  }
-
-  // reset SIGINT to be ignored throughout program EXCEPT @ getline() 
-  sigaction(SIGINT, &ignore_action, NULL); 
-
+    printf("Size of elements after split_word and before perform_expansion: %d\n", elements); 
 
 
-  // split words
-  elements = split_word(elements, line, ptrArray);
+    // perform expansion 
+    perform_expansion(backgroundProcessId, exitStatusForeground, elements, ptrArray);
+
+    print_array(elements, ptrArray); 
+
+    // parse tokenized input 
+    printf("\nParsing user input:\n"); 
+    parse_user_input(outFile, inFile, &runInBackground, elements, ptrArray);
 
 
-  printf("Size of elements after split_word and before perform_expansion: %d\n", elements); 
+    /* At this point, ptrArray is updated w/ the Parsed/Expanded tokens... inFile + outFile updated*/
 
+    // check if exit or cd commands 
+    exit_called(elements, exitStatusForeground, ptrArray);
+    if (cd_called(elements, ptrArray) == 0) {continue;}
 
-  // perform expansion 
-  perform_expansion(backgroundProcessId, exitStatusForeground, elements, ptrArray);
+    // fork a new process 
+    pid_t spawnPid = fork(); 
 
-  print_array(elements, ptrArray); 
+    switch (spawnPid) {
+      case -1: 
+        // fork fail 
+        fprintf(stderr, "fork failed.\n"); 
+        exit(1);
+        break;
 
-  // parse tokenized input 
-  printf("\nParsing user input:\n"); 
-  parse_user_input(outFile, inFile, &runInBackground, elements, ptrArray);
+      case 0:
+        // In the child process
+        printf("CHILD(%d) running ls command\n", getpid());
+        // reset SIGINT / SIGTSTP signals
+        sigaction(SIGINT, &old_int_action, NULL);
+        sigaction(SIGTSTP, &old_tstp_action, NULL); 
+        // child: redirect standard output to a file
+        if (inFile != NULL) {
+          int inFileFD = open(inFile, O_RDONLY); 
+          if (inFileFD == -1) {
+            perror("inFileFD failed...\n"); 
+            exit(1);
+          }
+          printf("inFileFD == %d", inFileFD); 
 
+          // redirect stdin to source file 
+          int redirected_input = dup2(inFileFD, 0); 
+          if (redirected_input == -1) {
+            perror("redirected_input fail...\n");
+            exit(2);
+          }
+        }
 
-  /* At this point, ptrArray is updated w/ the Parsed/Expanded tokens... inFile + outFile updated*/
+        // redirect std output to FILE... close stdOUT 
+        if (outFile != NULL) {
+          close(STDOUT_FILENO);
+          int outFileFD = open(outFile, O_WRONLY | O_CREAT | O_TRUNC, 0777); 
+          if (outFileFD == -1) {
+            perror("outFileFD failed...\n"); 
+            exit(1); 
+          }
+          printf("outFileFD == %d", outFileFD); 
 
-  // check if exit or cd commands 
-  exit_called(elements, exitStatusForeground, ptrArray);
-  cd_called(elements, ptrArray);
+          int redirected_output = dup2(outFileFD, 1);
+          if (redirected_output == -1) {
+            perror("redirected_output fail...\n"); 
+            exit(2);
+          }
+        }
 
-  /* next task: work on Non-builtin commands */ 
+        execvp(ptrArray[0], ptrArray); 
+        perror("execvp() failed... print to stderr\n");
+        fprintf(stderr, "execvp() failed when calling command...exiting with non-zero status code\n"); 
+        exit(2);
+        break;
 
+      default:
+        // in parent process 
+        // Wait for child's termination
+        if (runInBackground == 2) {
+          // don't wait on child process
+          mainChildPid = waitpid(mainChildPid, &mainChildStatus, WNOHANG);
+          printf("In the parent process waitpid returned value %d\n", mainChildPid);
+          backgroundProcessId = mainChildPid;
+        }
 
+        else {
+
+          // blocking wait for child process 
+          mainChildPid = waitpid(mainChildPid, &mainChildStatus, 0);
+          printf("The parent is done waiting. The pid of child that terminated is %d\n", mainChildPid);
+
+          if(WIFEXITED(mainChildStatus)){
+            printf("Child %d exited normally with status %d\n", mainChildPid, WEXITSTATUS(mainChildStatus));
+            exitStatusForeground = WEXITSTATUS(mainChildStatus);
+          } 
+
+          // if signaled
+          if (WIFSIGNALED(mainChildStatus)) {
+            int signalExitNumber = WTERMSIG(mainChildStatus);
+            exitStatusForeground = signalExitNumber + 128;
+            fprintf(stderr, "Child process %jd done. Signaled %d.\n", (intmax_t) mainChildPid, signalExitNumber);
+          }
+
+          // if stopped 
+          if (WIFSTOPPED(mainChildStatus)) {
+            int killStatus = 0;
+
+            // if SIGCONT kill() fails
+            if ((killStatus = kill(mainChildPid, SIGCONT)) == -1) {
+              perror("kill() failed with the mainChildPid after fork.\n"); 
+            }
+            fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t) mainChildPid); 
+            backgroundProcessId = mainChildPid;
+          }
+
+          exit(3);
+          break; 
+        }
+    }
 exit: 
-
-  free(line);
+    free(line);
+  }
   return 0; 
 }
+
+
 
 static void print_array(int elements, char *ptrArray[]) {
   // print the ptrArray
@@ -181,7 +278,7 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
       continue; 
     }
 
-    printf("parse_user_input is processing...continue iterations done...\n"); 
+   // printf("parse_user_input is processing...continue iterations done...\n"); 
 
     //  # (comment token) found ... stop looking
     if (strcmp(ptrArray[counter], "#") == 0) {
@@ -539,16 +636,6 @@ static void manage_background_processes() {
 
   while ((childPID = waitpid(0, &childStatus, WNOHANG | WUNTRACED)) > 0) {
 
-    /*pid_t childPGID = getpgid(childPID);
-
-      if (childPGID == -1) {
-      perror("There was an error calling getpgid().\n"); 
-      }
-    // check if child process group id of current child process == parent process group id
-    if (getpgid(childPID) == currGroupId) {
-
-*/
-
     // if exited normally 
     if (WIFEXITED(childStatus)) {
       int exitStatus = WEXITSTATUS(childStatus);
@@ -574,11 +661,11 @@ static void manage_background_processes() {
 
     // other state changes: ignore 
     // }
-  }
+}
 
-  if (childPID < 0) {
-    perror("Either no existing background processes or no more. waitpid() fails and returns...");  
-  }
+if (childPID < 0) {
+  perror("Either no existing background processes or no more. waitpid() fails and returns...");  
+}
 }
 
 /* Our signal handler for SIGINT */
@@ -588,8 +675,7 @@ static void handle_SIGINT(int signo){
   write(STDOUT_FILENO, message, 39);
 }
 
-static void cd_called(int elements, char *ptrArray[]) {
-
+static int cd_called(int elements, char *ptrArray[]) {
 
   char *home_env = getenv("HOME"); 
 
@@ -625,7 +711,9 @@ static void cd_called(int elements, char *ptrArray[]) {
     }
   }
 door:
-  printf("cd_called door() reached"); 
+  printf("cd_called door() reached");
+
+  return 0;
 
 }
 
