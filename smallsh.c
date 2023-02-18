@@ -106,7 +106,8 @@ int main(int argc, char *argv[]) {
   }
 
   for (;;) {
- int elements = 0;
+
+    int elements = 0;
     char *ptrArray[512] = {NULL}; 
 
     ssize_t bytes_read;  // later: maybe move into main infinite loop like example
@@ -169,8 +170,14 @@ int main(int argc, char *argv[]) {
     /* At this point, ptrArray is updated w/ the Parsed/Expanded tokens... inFile + outFile updated*/
 
     // check if exit or cd commands 
-    if (exit_called(elements, &exitStatusForeground, ptrArray) == -11) {continue;}
-    if (cd_called(home_env, &exitStatusForeground, elements, ptrArray) == -11) {continue;}
+    if (exit_called(elements, &exitStatusForeground, ptrArray) == -11) {
+      memset(line, 0, strlen(line));
+      continue;
+    }
+    if (cd_called(home_env, &exitStatusForeground, elements, ptrArray) == -11) {
+      memset(line, 0, strlen(line));
+      continue;
+    }
 
     // fork a new process 
     pid_t spawnPid = fork(); 
@@ -179,7 +186,9 @@ int main(int argc, char *argv[]) {
       case -1: 
         // fork fail 
         fprintf(stderr, "fork failed.\n"); 
-        exitStatusForeground = 1; 
+        exitStatusForeground = 1;
+
+        memset(line, 0, strlen(line));
         continue; 
 
       case 0:
@@ -273,6 +282,7 @@ int main(int argc, char *argv[]) {
     }
     // exit:
 
+    memset(line, 0, strlen(line));
     // free(line);
     line = NULL;
 
@@ -283,6 +293,8 @@ int main(int argc, char *argv[]) {
     }
 
   }
+
+  memset(line, 0, strlen(line));
   return 0; 
 }
 
@@ -502,7 +514,7 @@ static void perform_expansion(char *home_env, pid_t backgroundProcessId, int exi
       str_substitute(&ptrArray[i], "$?", exit_str); 
 
       // bullet point 4: occurrence of “$!” within a word shall be replaced with the process ID of the most recent background process (see waiting)
-      if (backgroundProcessId == -110) {
+      if (backgroundProcessId == -100) {
         str_substitute(&ptrArray[i], "$!", ""); 
       }
       else {
@@ -523,18 +535,17 @@ static int split_word(char *ifs_env, int elements, char *input, char *ptrArray[]
   char *token = NULL;
   int index = 0;
 
- /*
-  char *ch = input; 
+  /*
+     char *ch = input; 
 
-  printf("input char is: "); 
-  while (*ch != '\0') {
+     printf("input char is: "); 
+     while (*ch != '\0') {
 
-    printf("%c", *ch); 
-    ch++; 
-  }
+     printf("%c", *ch); 
+     ch++; 
+     }
 
-  */
-
+*/
 
   token = strtok(input, ifs_env);
 
@@ -547,12 +558,8 @@ static int split_word(char *ifs_env, int elements, char *input, char *ptrArray[]
     }
 
     strcpy(ptrArray[index], token);
-    //  free(token);
     elements++;
-
-
     index++;
-    //  copy = NULL;
 
     token = strtok(NULL, ifs_env);
     //   printf("Next Token =%s\n", token); 
@@ -563,10 +570,7 @@ static int split_word(char *ifs_env, int elements, char *input, char *ptrArray[]
       //    printf("NULL TOKEN IS INSERTED\n"); 
       break;}
   }
-
   return elements;  
-
-  // don't forget to free(ptrArray[index] after finishing !!
 }
 
 
@@ -623,9 +627,7 @@ exit:
 
 static void manage_background_processes() {
 
-  // get process group id of calling process..always sucess 
-  // pid_t currGroupId = getpgrp();
-  pid_t childPID = 0;
+    pid_t childPID = 0;
   int childStatus = 0;
 
   // WNOHANG flag - waitpid() returns 0 when no child process terminates...
@@ -663,9 +665,12 @@ static void manage_background_processes() {
     // }
 }
 
-if (childPID < 0) {
-  perror("Either no existing background processes or no more. waitpid() fails and returns...");  
-}
+/*
+   if (childPID < 0) {
+   perror("Either no existing background processes or no more. waitpid() fails and returns...");  
+   }
+   */
+
 }
 
 /* Our signal handler for SIGINT */
@@ -696,7 +701,7 @@ static int cd_called(char *home_env, int *exitStatusForeground, int elements, ch
     // no args provided... `cd NULL`
     if (elements == 2) {
       if (chdir(home_copy_env) == 0) { 
-        printf("chdir success\n"); 
+        //  printf("chdir success\n"); 
         free(new_home);
       }
       else { 
@@ -734,9 +739,6 @@ static int exit_called(int elements, int *exitStatusForeground, char *ptrArray[]
 
   int isAnInt = 2;
   int exit_val = -1111;
-
-  // get process group id of calling process..always sucess 
-  pid_t currGroupId = getpgrp();
   pid_t childPID = 0;
   int childStatus = 0;
 
@@ -749,18 +751,11 @@ static int exit_called(int elements, int *exitStatusForeground, char *ptrArray[]
       fprintf(stderr, "\nexit\n");
 
       // kill child processes in process group id w/ SIGINT.. don't wait using WNOHANG
-      while ((childPID = waitpid(-1, &childStatus, WNOHANG)) > 0) {
-        pid_t childPGID = getpgid(childPID);
-        if (childPGID == -1) {
-          perror("There was an error calling getpgid().\n"); 
-        }
-        // check if child process group id of current child process == parent process group id
-        if (getpgid(childPID) == currGroupId) {
-          int killStatus = 0;
-          // if SIGCONT kill() fails
-          if ((killStatus = kill(childPID, SIGINT)) == -1) {
-            perror("kill() failed with the childPID.\n"); 
-          }
+      while ((childPID = waitpid(0, &childStatus, WNOHANG)) > 0) {
+        int killStatus = 0;
+        // if SIGCONT kill() fails
+        if ((killStatus = kill(childPID, SIGINT)) == -1) {
+          perror("kill() failed with the childPID.\n"); 
         }
       }
       exit(exit_val);
@@ -793,29 +788,21 @@ static int exit_called(int elements, int *exitStatusForeground, char *ptrArray[]
       }
       // arg is int
       else if (isAnInt == 2) {
-
         exit_val = atoi(ptrArray[1]);
         fprintf(stderr, "\nexit\n");
 
         // kill child processes in process group id w/ SIGINT.. don't wait using WNOHANG
-        while ((childPID = waitpid(-1, &childStatus, WNOHANG)) > 0) {
-          pid_t childPGID = getpgid(childPID);
-          if (childPGID == -1) {
-            perror("There was an error calling getpgid().\n"); 
-          }
+        while ((childPID = waitpid(0, &childStatus, WNOHANG)) > 0) {
           // check if child process group id of current child process == parent process group id
-          if (getpgid(childPID) == currGroupId) {
-            int killStatus = 0;
-            // if SIGCONT kill() fails
-            if ((killStatus = kill(childPID, SIGINT)) == -1) {
-              perror("kill() failed with the childPID.\n"); 
-            }
+          int killStatus = 0;
+          // if SIGCONT kill() fails
+          if ((killStatus = kill(childPID, SIGINT)) == -1) {
+            perror("kill() failed with the childPID.\n"); 
           }
         }
       }
       exit(exit_val);
     }
-
   }
 
   return 0;
