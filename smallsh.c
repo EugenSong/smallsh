@@ -21,13 +21,13 @@
 #define arrlen(a) (sizeof(a) / sizeof *(a))
 
 // function to split words and store into an array of string ptrs 
-static int split_word(int elements, char *input, char *ptrArray[]);
+static int split_word(char *ifs_env, int elements, char *input, char *ptrArray[]);
 
 // function to string search and replace
 static char *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict substitute); 
 
 // function to word expansion
-static void perform_expansion(pid_t backgroundProcessId, int exitStatusForeground, int elements, char *ptrArray[]);
+static void perform_expansion(char *home_env, pid_t backgroundProcessId, int exitStatusForeground, int elements, char *ptrArray[]);
 
 // function to check for unwaited-for-background processes before taking user input 
 static void manage_background_processes();
@@ -45,10 +45,10 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
 static void print_array(int elements, char* ptrArray[]);
 
 // function when built-in exit() called
-static void exit_called(int elements, int exitStatusForeground, char* ptrArray[]);
+static int exit_called(int elements, int *exitStatusForeground, char* ptrArray[]);
 
 // function when built-in cd() called 
-static int cd_called(int elements, char *ptrArray[]);
+static int cd_called(char *home_env, int *exitStatusForeground, int elements, char *ptrArray[]);
 
 
 int main(int argc, char *argv[]) {
@@ -60,18 +60,27 @@ int main(int argc, char *argv[]) {
   int exitStatusForeground = 0;
   pid_t backgroundProcessId = -100;
 
-  char *ps1_env = NULL;
-  int elements = 0;
 
-  FILE *fp = stdin;
   char *line = NULL;   // keep outside main infinite loop 
   size_t buff_size = 0;
-  ssize_t bytes_read;  // later: maybe move into main infinite loop like example
 
-  char *ptrArray[512];
 
   pid_t mainChildPid = 0;
   int mainChildStatus = 0;
+
+  // PS1 environment var
+  char *ps1_env = getenv("PS1");
+  if (ps1_env == NULL) { ps1_env = ""; }
+
+  // HOME environment var
+  char *home_env = getenv("HOME");
+  if (home_env == NULL) { home_env = ""; }
+
+  char *ifs_env = getenv("IFS");
+  if (ifs_env == NULL) {ifs_env = " \t\n"; }
+
+
+
 
   /* -------------------------------------------- */ 
   /*  SIGINT & SIGTSTP signal set-up (done) */
@@ -92,23 +101,30 @@ int main(int argc, char *argv[]) {
   sigaction(SIGTSTP, &ignore_action, &old_tstp_action);
 
 
-  /* ************ INPUT ********************* */
-  /*  ---------------------------------------------------------
-   *  Input - Managing background processes (Done) 
-   *  check for un-waited-for-background processes in the same process group ID as smallsh
-   *  ---------------------------------------------------------
-   */
+  if (feof(stdin) == 0) {
+    fflush(stdin); 
+  }
 
   for (;;) {
+ int elements = 0;
+    char *ptrArray[512] = {NULL}; 
+
+    ssize_t bytes_read;  // later: maybe move into main infinite loop like example
     manage_background_processes(); 
 
     /*  ----  Input - The prompt (DONE) ------ */
-    print_prompt(ps1_env);
+    //print_prompt(ps1_env);
+    fputs(ps1_env, stderr); 
 
     /* ------ Input - Reading a line of input (Done) ------------------ */
 
     // read input from stdin
-    bytes_read = getline(&line, &buff_size, fp);
+    bytes_read = getline(&line, &buff_size, stdin);
+
+    if (feof(stdin)) {
+      exit(exitStatusForeground);
+      break;
+    }
 
     // signal interrupt or getline() fail...reset errno and  
     if (bytes_read == -1) {
@@ -118,35 +134,43 @@ int main(int argc, char *argv[]) {
       putchar('\n'); 
       continue; 
     }
-    else {
-      printf("\nRead number of bytes from getline(): %zd\n", bytes_read);
-      printf("Moving onto word_splitting...\n"); 
+
+    if (strcmp(line, "\n") == 0) {
+      clearerr(stdin);
+      continue;
     }
+    /*  else {
+        printf("\nRead number of bytes from getline(): %zd\n", bytes_read);
+        printf("Moving onto word_splitting...\n"); 
+        }
+        */
+
+
 
     // reset SIGINT to be ignored throughout program EXCEPT @ getline() 
     sigaction(SIGINT, &ignore_action, NULL); 
 
     // split words
-    elements = split_word(elements, line, ptrArray);
+    elements = split_word(ifs_env, elements, line, ptrArray);
 
-    printf("Size of elements after split_word and before perform_expansion: %d\n", elements); 
+    //  printf("Size of elements after split_word and before perform_expansion: %d\n", elements); 
 
 
     // perform expansion 
-    perform_expansion(backgroundProcessId, exitStatusForeground, elements, ptrArray);
+    perform_expansion(home_env, backgroundProcessId, exitStatusForeground, elements, ptrArray);
 
-    print_array(elements, ptrArray); 
+    // print_array(elements, ptrArray); 
 
     // parse tokenized input 
-    printf("\nParsing user input:\n"); 
+    //   printf("\nParsing user input:\n"); 
     parse_user_input(outFile, inFile, &runInBackground, elements, ptrArray);
 
 
     /* At this point, ptrArray is updated w/ the Parsed/Expanded tokens... inFile + outFile updated*/
 
     // check if exit or cd commands 
-    exit_called(elements, exitStatusForeground, ptrArray);
-    if (cd_called(elements, ptrArray) == 0) {continue;}
+    if (exit_called(elements, &exitStatusForeground, ptrArray) == -11) {continue;}
+    if (cd_called(home_env, &exitStatusForeground, elements, ptrArray) == -11) {continue;}
 
     // fork a new process 
     pid_t spawnPid = fork(); 
@@ -155,12 +179,12 @@ int main(int argc, char *argv[]) {
       case -1: 
         // fork fail 
         fprintf(stderr, "fork failed.\n"); 
-        exit(1);
-        break;
+        exitStatusForeground = 1; 
+        continue; 
 
       case 0:
         // In the child process
-        printf("CHILD(%d) running ls command\n", getpid());
+        //      printf("CHILD(%d) running ls command\n", getpid());
         // reset SIGINT / SIGTSTP signals
         sigaction(SIGINT, &old_int_action, NULL);
         sigaction(SIGTSTP, &old_tstp_action, NULL); 
@@ -168,15 +192,15 @@ int main(int argc, char *argv[]) {
         if (inFile != NULL) {
           int inFileFD = open(inFile, O_RDONLY); 
           if (inFileFD == -1) {
-            perror("inFileFD failed...\n"); 
+            fprintf(stderr, "inFileFD failed...\n"); 
             exit(1);
           }
-          printf("inFileFD == %d", inFileFD); 
+          //         printf("inFileFD == %d", inFileFD); 
 
           // redirect stdin to source file 
           int redirected_input = dup2(inFileFD, 0); 
           if (redirected_input == -1) {
-            perror("redirected_input fail...\n");
+            fprintf(stderr, "redirected_input fail...\n"); 
             exit(2);
           }
         }
@@ -186,23 +210,22 @@ int main(int argc, char *argv[]) {
           close(STDOUT_FILENO);
           int outFileFD = open(outFile, O_WRONLY | O_CREAT | O_TRUNC, 0777); 
           if (outFileFD == -1) {
-            perror("outFileFD failed...\n"); 
+            fprintf(stderr, "outFileFD failed...\n"); 
             exit(1); 
           }
-          printf("outFileFD == %d", outFileFD); 
+          //        printf("outFileFD == %d", outFileFD); 
 
           int redirected_output = dup2(outFileFD, 1);
           if (redirected_output == -1) {
-            perror("redirected_output fail...\n"); 
+            fprintf(stderr, "redirected_output fail...\n"); 
             exit(2);
           }
         }
 
-        execvp(ptrArray[0], ptrArray); 
-        perror("execvp() failed... print to stderr\n");
-        fprintf(stderr, "execvp() failed when calling command...exiting with non-zero status code\n"); 
-        exit(2);
-        break;
+        if (execvp(ptrArray[0], ptrArray) == -1) { 
+          fprintf(stderr, "execvp() failed when calling command...exiting with non-zero status code\n"); 
+          exit(2);
+        }
 
       default:
         // in parent process 
@@ -218,7 +241,7 @@ int main(int argc, char *argv[]) {
 
           // blocking wait for child process 
           mainChildPid = waitpid(mainChildPid, &mainChildStatus, 0);
-          printf("The parent is done waiting. The pid of child that terminated is %d\n", mainChildPid);
+          //       printf("The parent is done waiting. The pid of child that terminated is %d\n", mainChildPid);
 
           if(WIFEXITED(mainChildStatus)){
             printf("Child %d exited normally with status %d\n", mainChildPid, WEXITSTATUS(mainChildStatus));
@@ -244,12 +267,21 @@ int main(int argc, char *argv[]) {
             backgroundProcessId = mainChildPid;
           }
 
-          exit(3);
+          //    exit(3);
           break; 
         }
     }
-exit: 
-    free(line);
+    // exit:
+
+    // free(line);
+    line = NULL;
+
+    // free each ptr array index
+    for (int u = 0; u < elements; u++) {
+      free(ptrArray[u]);
+
+    }
+
   }
   return 0; 
 }
@@ -278,7 +310,7 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
       continue; 
     }
 
-   // printf("parse_user_input is processing...continue iterations done...\n"); 
+    // printf("parse_user_input is processing...continue iterations done...\n"); 
 
     //  # (comment token) found ... stop looking
     if (strcmp(ptrArray[counter], "#") == 0) {
@@ -338,7 +370,7 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
     // wordlist pointer reached the end w/o encountering a comment (#)
     else if (counter == elements-2) {
 
-      printf("counter == elements-2 (aka end of line before NULL) reached\n"); 
+      //    printf("counter == elements-2 (aka end of line before NULL) reached\n"); 
 
       if (counter >= 0) {
 
@@ -422,32 +454,28 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
     }
   }
 
-  print_array(elements, ptrArray);
+  // print_array(elements, ptrArray);
 }
 
 
 
 static void print_prompt(char *ps1_env) {
-  // expand PS1 environment variable.. unset -> "" | fprintf(stderr, _) prints to stderr
-  ps1_env = getenv("PS1");
-  if (ps1_env == NULL) { ps1_env = ""; }
+
   fprintf(stderr, "%s",ps1_env);
 
 }
 
-static void perform_expansion(pid_t backgroundProcessId, int exitStatusForeground, int elements, char *ptrArray[]) {
+static void perform_expansion(char *home_env, pid_t backgroundProcessId, int exitStatusForeground, int elements, char *ptrArray[]) {
 
 
   char exit_str[10];
   char process_id[10];
 
   char temp[50];
-  char *expan_env = NULL;
-  expan_env = getenv("HOME");
-  printf("\nexpan_env is %s\n", expan_env); 
+
 
   int i = 0;
-  printf("size of ptrArray is %d\n", elements);
+  //  printf("size of ptrArray is %d\n", elements);
 
   // elements - 1 to disregard the NULL pointer @ the end 
   while (i < elements-1) {
@@ -457,10 +485,7 @@ static void perform_expansion(pid_t backgroundProcessId, int exitStatusForegroun
 
       // bullet point 1: “~/” at the beginning of a word shall be replaced with the value of the HOME environment variable
       if (strncmp(ptrArray[i], "~/", 2) == 0) {
-        if (expan_env == NULL) {
-          expan_env = ""; 
-        }
-        str_substitute(&ptrArray[i], "~", expan_env);
+        str_substitute(&ptrArray[i], "~", home_env);
       }
 
       // pre- bullet point 2: get the smallsh pid and transform into a str to use in str_substitute() 
@@ -493,76 +518,51 @@ static void perform_expansion(pid_t backgroundProcessId, int exitStatusForegroun
 }
 
 
-static int split_word(int elements, char *input, char *ptrArray[]) {
+static int split_word(char *ifs_env, int elements, char *input, char *ptrArray[]) {
 
-  char *ifs_env = getenv("IFS");
   char *token = NULL;
-  char *copy = NULL;
   int index = 0;
 
+ /*
+  char *ch = input; 
 
-  // if unset --> "space - tab - new line"
-  if (ifs_env == NULL) {
-    ifs_env = " \t\n"; 
+  printf("input char is: "); 
+  while (*ch != '\0') {
+
+    printf("%c", *ch); 
+    ch++; 
   }
 
+  */
 
-  token = strtok(input, ifs_env); 
-  printf("First token =%s\n", token);
 
-  copy = strdup(token);
-  //printf("Copied token =%s\n", copy); 
+  token = strtok(input, ifs_env);
 
-  // allocate memory in str pointer based on len of token
-  ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof (*ptrArray));
-
-  if (ptrArray[index] == NULL) {
-    perror("mallloc failed, exiting...\n");
-    exit(1); 
-  }
-
-  strcpy(ptrArray[index], copy);
-  free(copy);
-  elements++;
-
-  for (;;) {
-
-    index++;
-    copy = NULL;
-
-    token = strtok(NULL, ifs_env);
-    printf("Next Token =%s\n", token); 
-
-    if (token == NULL) { 
-      ptrArray[index] = (char*) malloc(sizeof(*ptrArray)); 
-      ptrArray[index] = token;
-      elements++; 
-      printf("NULL TOKEN IS INSERTED\n"); 
-      break;}
-
-    copy = strdup(token);
-
-    ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof (*ptrArray));
+  while (token != NULL) {
+    ptrArray[index] = (char*)malloc((strlen(token) + 1) * sizeof (char));
 
     if (ptrArray[index] == NULL) {
       perror("mallloc failed, exiting...\n");
       exit(1); 
     }
 
-    strcpy(ptrArray[index], copy);
-    free(copy);
-    elements++; 
+    strcpy(ptrArray[index], token);
+    //  free(token);
+    elements++;
+
+
+    index++;
+    //  copy = NULL;
+
+    token = strtok(NULL, ifs_env);
+    //   printf("Next Token =%s\n", token); 
+
+    if (token == NULL) { 
+      ptrArray[index] = NULL; 
+      elements++;
+      //    printf("NULL TOKEN IS INSERTED\n"); 
+      break;}
   }
-
-
-  printf("The strings are:\n");
-
-  // print the ptrArray
-  print_array(elements, ptrArray);  
-
-  printf("Done splitting word and printing tokens.\n");
-
-  printf("Number of elements from split_word is: %d\n", elements); 
 
   return elements;  
 
@@ -675,50 +675,62 @@ static void handle_SIGINT(int signo){
   write(STDOUT_FILENO, message, 39);
 }
 
-static int cd_called(int elements, char *ptrArray[]) {
+static int cd_called(char *home_env, int *exitStatusForeground, int elements, char *ptrArray[]) {
 
-  char *home_env = getenv("HOME"); 
 
-  // printf("The old string before / is %s\n", home_env); 
+  char *home_copy_env = strdup(home_env);
 
-  // expand home env 
-  int new_len = strlen(home_env) + 2;
-  char *back_slash = malloc(new_len * sizeof(char)); 
-  back_slash[0] = '/';
-  strcat(home_env, back_slash);
-  // printf("The new string after / is %s\n", home_env); 
-  free(back_slash); 
+  size_t len = strlen(home_copy_env); 
+
+  char *new_home = malloc(len+2);
+  strcpy(new_home, home_copy_env);
+  new_home[len] = '/';
+  new_home[len+1] = '\0';
+
+  // printf("The old string before / is %s\n", home_copy_env); 
+
+  // printf("The new string after / is %s\n", home_copy_env); 
 
   if (strcmp(ptrArray[0], "cd") == 0) {
 
     // no args provided... `cd NULL`
     if (elements == 2) {
-      if (chdir(home_env) == 0) { printf("chdir success\n"); }
-      else { perror("chdir() failed..."); }
+      if (chdir(home_copy_env) == 0) { 
+        printf("chdir success\n"); 
+        free(new_home);
+      }
+      else { 
+        fprintf(stderr, "no args provided but chdir() failed...\n");
+        *exitStatusForeground = 1;
+
+      }
     }
 
     // more than 1 arg provided... `cd arg1 arg2 NULL` 
     else if (elements >3) {
-      fprintf(stderr, "Failure..More than one arg provided to cd()\n"); 
+      fprintf(stderr, "Failure..More than one arg provided to cd()\n");
+      *exitStatusForeground = 1;
       goto door;
     }
 
     // good len... `cd arg NULL`
     else {
-
       if (chdir(ptrArray[1]) == 0) { printf("chdir success\n"); }
-      else { perror("chdir() failed in else block.. good len args"); }
+      else { 
+        fprintf(stderr, "chdir() failed...good len of args"); 
+        *exitStatusForeground = 1;
+      }
     }
   }
-door:
-  printf("cd_called door() reached");
-
   return 0;
+door:
+  printf("cd command error");
+  return -11;
 
 }
 
 
-static void exit_called(int elements, int exitStatusForeground, char *ptrArray[]) {
+static int exit_called(int elements, int *exitStatusForeground, char *ptrArray[]) {
 
   int isAnInt = 2;
   int exit_val = -1111;
@@ -733,7 +745,7 @@ static void exit_called(int elements, int exitStatusForeground, char *ptrArray[]
 
     // no arg provided ... `exit (NULL)`
     if (elements == 2) {
-      exit_val = exitStatusForeground;
+      exit_val = *exitStatusForeground;
       fprintf(stderr, "\nexit\n");
 
       // kill child processes in process group id w/ SIGINT.. don't wait using WNOHANG
@@ -756,7 +768,8 @@ static void exit_called(int elements, int exitStatusForeground, char *ptrArray[]
     // more than 1 arg is provided... `exit arg1 arg2 (NULL)`
     else if (elements > 3) {
       fprintf(stderr, "Too many arguments provided to exit()...\n"); 
-      goto door;
+      *exitStatusForeground = 1; 
+      return -11;
     }
     // good len... `exit arg (NULL)`
     else if (elements == 3) {
@@ -773,8 +786,11 @@ static void exit_called(int elements, int exitStatusForeground, char *ptrArray[]
       }
 
       // arg is not int --> leave func call 
-      if (isAnInt == -2) { goto door; }
-
+      if (isAnInt == -2) { 
+        fprintf(stderr, "exit command argrs is not an int\n");
+        *exitStatusForeground = 1;
+        return -11;
+      }
       // arg is int
       else if (isAnInt == 2) {
 
@@ -799,8 +815,9 @@ static void exit_called(int elements, int exitStatusForeground, char *ptrArray[]
       }
       exit(exit_val);
     }
-door:
-    printf("Door reached"); 
+
   }
+
+  return 0;
 }
 
