@@ -56,21 +56,8 @@ int main(int argc, char *argv[]) {
   char *outFile = NULL;
   char *inFile = NULL; 
 
-  /*
-  int runInBackground = 0;
-  int exitStatusForeground = 0;
-  pid_t backgroundProcessId = -100;
-
-  */
-
   char *line = NULL;   // keep outside main infinite loop 
   size_t buff_size = 0;
-
-
-  /*
-  pid_t mainChildPid = 0;
-  int mainChildStatus = 0;
-  */
 
   // PS1 environment var
   char *ps1_env = getenv("PS1");
@@ -82,9 +69,6 @@ int main(int argc, char *argv[]) {
 
   char *ifs_env = getenv("IFS");
   if (ifs_env == NULL) {ifs_env = " \t\n"; }
-
-
-
 
   /* -------------------------------------------- */ 
   /*  SIGINT & SIGTSTP signal set-up (done) */
@@ -109,28 +93,25 @@ int main(int argc, char *argv[]) {
     fflush(stdin); 
   }
 
-  for (;;) {
-
-  int runInBackground = 0;
   int exitStatusForeground = 0;
   pid_t backgroundProcessId = -1;
 
-  pid_t mainChildPid = 0;
-  int mainChildStatus = 0;
+  for (;;) {
 
+    int runInBackground = 0;
 
+    pid_t mainChildPid = 0;
+    int mainChildStatus = 0;
 
     int elements = 0;
     char *ptrArray[512] = {NULL}; 
+    ssize_t bytes_read;
 
-    ssize_t bytes_read;  // later: maybe move into main infinite loop like example
+
     manage_background_processes(&backgroundProcessId); 
 
     /*  ----  Input - The prompt (DONE) ------ */
-    //print_prompt(ps1_env);
     fputs(ps1_env, stderr); 
-
-    /* ------ Input - Reading a line of input (Done) ------------------ */
 
     // read input from stdin
     bytes_read = getline(&line, &buff_size, stdin);
@@ -154,6 +135,10 @@ int main(int argc, char *argv[]) {
       continue;
     }
 
+    if (strncmp(line, "bash", 4) == 0) {
+      ifs_env = "\t\n";
+    }
+
     // reset SIGINT to be ignored throughout program EXCEPT @ getline() 
     sigaction(SIGINT, &ignore_action, NULL); 
 
@@ -172,16 +157,22 @@ int main(int argc, char *argv[]) {
     //   printf("\nParsing user input:\n"); 
     parse_user_input(outFile, inFile, &runInBackground, elements, ptrArray);
 
-
-    /* At this point, ptrArray is updated w/ the Parsed/Expanded tokens... inFile + outFile updated*/
-
     // check if exit or cd commands 
     if (exit_called(elements, &exitStatusForeground, ptrArray) == -11) {
       memset(line, 0, strlen(line));
+      line = NULL;
+      for (int u = 0; u < elements; u++) {
+        free(ptrArray[u]);
+      }
       continue;
     }
+
     if (cd_called(home_env, &exitStatusForeground, elements, ptrArray) == -11) {
       memset(line, 0, strlen(line));
+      line = NULL;
+      for (int u = 0; u < elements; u++) {
+        free(ptrArray[u]);
+      }
       continue;
     }
 
@@ -215,14 +206,14 @@ int main(int argc, char *argv[]) {
           int redirected_input = dup2(inFileFD, 0); 
           if (redirected_input == -1) {
             fprintf(stderr, "redirected_input fail...\n"); 
-            exit(2);
+            exit(1);
           }
         }
 
         // redirect std output to FILE... close stdOUT 
         if (outFile != NULL) {
           close(STDOUT_FILENO);
-          int outFileFD = open(outFile, O_WRONLY | O_CREAT | O_TRUNC, 0777); 
+          int outFileFD = open(outFile, O_RDWR | O_CREAT | O_CLOEXEC | O_TRUNC, 0777); 
           if (outFileFD == -1) {
             fprintf(stderr, "outFileFD failed...\n"); 
             exit(1); 
@@ -232,13 +223,13 @@ int main(int argc, char *argv[]) {
           int redirected_output = dup2(outFileFD, 1);
           if (redirected_output == -1) {
             fprintf(stderr, "redirected_output fail...\n"); 
-            exit(2);
+            exit(1);
           }
         }
 
         if (execvp(ptrArray[0], ptrArray) == -1) { 
           fprintf(stderr, "execvp() failed when calling command...exiting with non-zero status code\n"); 
-          exit(2);
+          exit(1);
         }
 
       default:
@@ -246,7 +237,7 @@ int main(int argc, char *argv[]) {
         // Wait for child's termination
         if (runInBackground == 2) {
           // don't wait on child process
-          mainChildPid = waitpid(mainChildPid, &mainChildStatus, WNOHANG);
+          mainChildPid = waitpid(spawnPid, &mainChildStatus, WNOHANG);
           printf("In the parent process waitpid returned value %d\n", mainChildPid);
           backgroundProcessId = mainChildPid;
         }
@@ -254,11 +245,12 @@ int main(int argc, char *argv[]) {
         else {
 
           // blocking wait for child process 
-          mainChildPid = waitpid(mainChildPid, &mainChildStatus, 0);
+          mainChildPid = waitpid(spawnPid, &mainChildStatus, 0);
           //       printf("The parent is done waiting. The pid of child that terminated is %d\n", mainChildPid);
 
-          if(WIFEXITED(mainChildStatus)){
-           // printf("Child %d exited normally with status %d\n", mainChildPid, WEXITSTATUS(mainChildStatus));
+          if (WIFEXITED(mainChildStatus)){
+            // printf("Child %d exited normally with status %d\n", mainChildPid, WEXITSTATUS(mainChildStatus));
+            //printf("mainChildStatus as int: %d\n", WEXITSTATUS(mainChildStatus));
             exitStatusForeground = WEXITSTATUS(mainChildStatus);
           } 
 
@@ -266,7 +258,7 @@ int main(int argc, char *argv[]) {
           else if (WIFSIGNALED(mainChildStatus)) {
             int signalExitNumber = WTERMSIG(mainChildStatus);
             exitStatusForeground = signalExitNumber + 128;
-           // fprintf(stderr, "Child process %jd done. Signaled %d.\n", (intmax_t) mainChildPid, signalExitNumber);
+            // fprintf(stderr, "Child process %jd done. Signaled %d.\n", (intmax_t) mainChildPid, signalExitNumber);
           }
 
           // if stopped 
@@ -577,6 +569,9 @@ static int split_word(char *ifs_env, int elements, char *input, char *ptrArray[]
       //    printf("NULL TOKEN IS INSERTED\n"); 
       break;}
   }
+
+  // print_array(elements, ptrArray); 
+
   return elements;  
 }
 
@@ -634,7 +629,7 @@ exit:
 
 static void manage_background_processes(pid_t *backgroundProcessId) {
 
-   
+
   int childStatus = 0;
 
   // WNOHANG flag - waitpid() returns 0 when no child process terminates...
@@ -669,13 +664,13 @@ static void manage_background_processes(pid_t *backgroundProcessId) {
     }
 
     // other state changes: ignore 
-}
+  }
 
-/*
-   if (childPID < 0) {
-   perror("Either no existing background processes or no more. waitpid() fails and returns...");  
-   }
-   */
+  /*
+     if (childPID < 0) {
+     perror("Either no existing background processes or no more. waitpid() fails and returns...");  
+     }
+     */
 
 }
 
@@ -706,29 +701,29 @@ static int cd_called(char *home_env, int *exitStatusForeground, int elements, ch
 
     // no args provided... `cd NULL`
     if (elements == 2) {
-      if (chdir(new_home) == 0) { 
-        //  printf("chdir success\n"); 
-        free(new_home);
-      }
-      else { 
+      if (chdir(new_home) != 0) { 
         fprintf(stderr, "no args provided but chdir() failed...\n");
         *exitStatusForeground = 1;
       }
+      free(new_home);
     }
 
     // more than 1 arg provided... `cd arg1 arg2 NULL` 
     else if (elements >3) {
       fprintf(stderr, "Failure..More than one arg provided to cd()\n");
       *exitStatusForeground = 1;
+      free(new_home); 
       goto door;
     }
 
     // good len... `cd arg NULL`
     else {
-        if (chdir(ptrArray[1]) != 0) { 
+      // printf("pointer Array 1 is %s\n", ptrArray[1]); 
+      if (chdir(ptrArray[1]) != 0) { 
         fprintf(stderr, "chdir() failed on good len of args"); 
         *exitStatusForeground = 1;
       }
+      free(new_home);
     }
   }
   return 0;
@@ -774,8 +769,8 @@ static int exit_called(int elements, int *exitStatusForeground, char *ptrArray[]
     else if (elements == 3) {
       // check if 2nd arg is an int or not
       for (int i = 0; ptrArray[1][i] != '\0'; i++) {
-        printf("running in the for loop when elem == 3\n");
-        printf("char is %c\n", ptrArray[1][i]); 
+        // printf("running in the for loop when elem == 3\n");
+        // printf("char is %c\n", ptrArray[1][i]); 
         if (isdigit(ptrArray[1][i]) == 0) {
           printf("Not an int\n"); 
           isAnInt = -2;
