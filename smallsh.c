@@ -39,7 +39,7 @@ static void handle_SIGINT(int signo);
 static void print_prompt(char *ps1_env);
 
 // function to parse & tokenize user input 
-static void parse_user_input(char *outFile, char *inFile, int *runInBackground, int elements, char *ptrArray[]);
+static void parse_user_input(char **outFile, char **inFile, int *runInBackground, int elements, char *ptrArray[]);
 
 // function to print the char * []
 static void print_array(int elements, char* ptrArray[]);
@@ -53,8 +53,7 @@ static int cd_called(char *home_env, int *exitStatusForeground, int elements, ch
 
 int main(int argc, char *argv[]) {
 
-  char *outFile = NULL;
-  char *inFile = NULL; 
+
 
   char *line = NULL;   // keep outside main infinite loop 
   size_t buff_size = 0;
@@ -98,6 +97,11 @@ int main(int argc, char *argv[]) {
 
   for (;;) {
 
+
+    char *outFile = NULL;
+    char *inFile = NULL; 
+
+
     int runInBackground = 0;
 
     pid_t mainChildPid = 0;
@@ -111,7 +115,8 @@ int main(int argc, char *argv[]) {
     manage_background_processes(&backgroundProcessId); 
 
     /*  ----  Input - The prompt (DONE) ------ */
-    fputs(ps1_env, stderr); 
+    print_prompt(ps1_env);
+    //  fputs(ps1_env, stderr); 
 
     // read input from stdin
     bytes_read = getline(&line, &buff_size, stdin);
@@ -153,9 +158,16 @@ int main(int argc, char *argv[]) {
 
     // print_array(elements, ptrArray); 
 
+    //  printf("There are %d number of elements before parsing input", elements); 
     // parse tokenized input 
     //   printf("\nParsing user input:\n"); 
-    parse_user_input(outFile, inFile, &runInBackground, elements, ptrArray);
+    parse_user_input(&outFile, &inFile, &runInBackground, elements, ptrArray);
+
+    // printf("The parsed input is: \n"); 
+    //print_array(elements, ptrArray);
+
+    //  printf("InFile is %s\n", inFile); 
+    //  printf("OutFile is %s\n", outFile); 
 
     // check if exit or cd commands 
     if (exit_called(elements, &exitStatusForeground, ptrArray) == -11) {
@@ -208,11 +220,12 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "redirected_input fail...\n"); 
             exit(1);
           }
+          close(inFileFD);
         }
 
         // redirect std output to FILE... close stdOUT 
         if (outFile != NULL) {
-          close(STDOUT_FILENO);
+          //close(STDOUT_FILENO);
           int outFileFD = open(outFile, O_RDWR | O_CREAT | O_CLOEXEC | O_TRUNC, 0777); 
           if (outFileFD == -1) {
             fprintf(stderr, "outFileFD failed...\n"); 
@@ -225,6 +238,8 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "redirected_output fail...\n"); 
             exit(1);
           }
+
+          close(outFileFD);
         }
 
         if (execvp(ptrArray[0], ptrArray) == -1) { 
@@ -235,17 +250,18 @@ int main(int argc, char *argv[]) {
       default:
         // in parent process 
         // Wait for child's termination
+        printf("before runinBackground, %d\n", runInBackground); 
         if (runInBackground == 2) {
           // don't wait on child process
           mainChildPid = waitpid(spawnPid, &mainChildStatus, WNOHANG);
-          printf("In the parent process waitpid returned value %d\n", mainChildPid);
+       //   printf("In the parent process waitpid returned value %d\n", mainChildPid);
           backgroundProcessId = mainChildPid;
         }
 
         else {
 
           // blocking wait for child process 
-          mainChildPid = waitpid(spawnPid, &mainChildStatus, 0);
+          mainChildPid = waitpid(spawnPid, &mainChildStatus, WNOHANG);
           //       printf("The parent is done waiting. The pid of child that terminated is %d\n", mainChildPid);
 
           if (WIFEXITED(mainChildStatus)){
@@ -310,7 +326,7 @@ static void print_array(int elements, char *ptrArray[]) {
 }
 
 
-static void parse_user_input(char *outFile, char *inFile, int *runInBackground, int elements, char *ptrArray[]) {
+static void parse_user_input(char **outFile, char **inFile, int *runInBackground, int elements, char *ptrArray[]) {
 
   for (int counter = 0; counter < elements; counter++) {
 
@@ -339,14 +355,16 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
         if (counter-3 >= 0) {
 
           if (strcmp(ptrArray[counter-3], "<") == 0) {
-            inFile = ptrArray[counter-2];
+            //   printf("InFile is set ..1\n"); 
+            *inFile = ptrArray[counter-2];
             free(ptrArray[counter-3]);
             ptrArray[counter-3] = NULL;
 
             // check for "> - output_file redirection operator
             if (counter-5 >= 0) {
               if (strcmp(ptrArray[counter-5], ">") == 0) {
-                outFile = ptrArray[counter-4];
+                //      printf("OutFile is set...1\n"); 
+                *outFile = ptrArray[counter-4];
                 free(ptrArray[counter-5]); 
                 ptrArray[counter-5] = NULL;
               }
@@ -356,13 +374,15 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
 
           // check for ">" before & - output redirection operator
           else if (strcmp(ptrArray[counter-3], ">") == 0) {
-            outFile = ptrArray[counter-2];
+            //   printf("OutFile is set...2\n"); 
+            *outFile = ptrArray[counter-2];
             free(ptrArray[counter-3]);
             ptrArray[counter-3] = NULL; 
 
             if (counter-5 >= 0) {
               if (strcmp(ptrArray[counter-5], "<") == 0) {
-                inFile = ptrArray[counter-4];
+                //     printf("InFile is set...2\n"); 
+                *inFile = ptrArray[counter-4];
                 free(ptrArray[counter-5]); 
                 ptrArray[counter-5] = NULL;
               }
@@ -393,14 +413,16 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
           // check for "<" before & - input redirection operator
           if (counter-2 >= 0) {
             if (strcmp(ptrArray[counter-2], "<") == 0) {
-              inFile = ptrArray[counter-1];
+              //   printf("InFile is set...3\n"); 
+              *inFile = ptrArray[counter-1];
               free(ptrArray[counter-2]);
               ptrArray[counter-2] = NULL;
 
               // if "> output_file" exists before the "<"
               if (counter-4 >= 0) {
                 if (strcmp(ptrArray[counter-4], ">") == 0) {
-                  outFile = ptrArray[counter-3];
+                  //    printf("OutFile is set...3\n"); 
+                  *outFile = ptrArray[counter-3];
                   free(ptrArray[counter-4]); 
                   ptrArray[counter-4] = NULL;
                 }
@@ -409,13 +431,15 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
 
             // check for ">" before & - output redirection operator
             else if (strcmp(ptrArray[counter-2], ">") == 0) {
-              outFile = ptrArray[counter-1];
+              //    printf("Outfile is set...4\n"); 
+              *outFile = ptrArray[counter-1];
               free(ptrArray[counter-2]);
               ptrArray[counter-2] = NULL; 
 
               if (counter-4 >= 0) {
                 if (strcmp(ptrArray[counter-4], "<") == 0) {
-                  inFile = ptrArray[counter-3];
+                  //      printf("Infile is set...4\n"); 
+                  *inFile = ptrArray[counter-3];
                   free(ptrArray[counter-4]); 
                   ptrArray[counter-4] = NULL;
 
@@ -430,13 +454,15 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
         else {
           if (counter-1 >= 0) {
             if (strcmp(ptrArray[counter-1], "<") == 0) {
-              inFile = ptrArray[counter];
+              //    printf("Infile is set...5\n");
+              *inFile = ptrArray[counter];
               free(ptrArray[counter-1]);
               ptrArray[counter-1] = NULL;
 
               if (counter-3 >= 0) {
                 if (strcmp(ptrArray[counter-3], ">") == 0) {
-                  outFile = ptrArray[counter-2];
+                  //      printf("Outfile is set...5\n"); 
+                  *outFile = ptrArray[counter-2];
                   free(ptrArray[counter-3]);
                   ptrArray[counter-3] = NULL;
                 }
@@ -444,13 +470,15 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
             }
 
             else if (strcmp(ptrArray[counter-1], ">") == 0) {
-              outFile = ptrArray[counter];
+              //    printf("Outfile is set...6\n"); 
+              *outFile = ptrArray[counter];
               free(ptrArray[counter-1]);
               ptrArray[counter-1] = NULL;
 
               if (counter-3 >= 0) {
                 if (strcmp(ptrArray[counter-3], "<") == 0) {
-                  inFile = ptrArray[counter-2];
+                  //      printf("Infile is set...6\n"); 
+                  *inFile = ptrArray[counter-2];
                   free(ptrArray[counter-3]);
                   ptrArray[counter-3] = NULL;
                 }
@@ -460,6 +488,8 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
           break;
         }
       }
+
+      break;
     }
   }
 
@@ -470,7 +500,9 @@ static void parse_user_input(char *outFile, char *inFile, int *runInBackground, 
 
 static void print_prompt(char *ps1_env) {
 
-  fprintf(stderr, "%s",ps1_env);
+  // fprintf(stderr, "%s",ps1_env);
+  fputs(ps1_env, stderr); 
+
 
 }
 
