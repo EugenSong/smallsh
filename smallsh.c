@@ -107,7 +107,6 @@ int main(int argc, char *argv[]) {
 
     int runInBackground = 0;
 
-    //  pid_t mainChildPid = 0;
     int mainChildStatus = 0;
 
     int elements = 0;
@@ -159,7 +158,7 @@ int main(int argc, char *argv[]) {
     // perform expansion 
     perform_expansion(home_env, &backgroundProcessId, exitStatusForeground, elements, ptrArray);
 
-    //  print_array(elements, ptrArray); 
+  //    print_array(elements, ptrArray); 
 
     //  printf("There are %d number of elements before parsing input", elements); 
     // parse tokenized input 
@@ -573,18 +572,6 @@ static int split_word(char *ifs_env, int elements, char *input, char *ptrArray[]
   char *token = NULL;
   int index = 0;
 
-  /*
-     char *ch = input; 
-
-     printf("input char is: "); 
-     while (*ch != '\0') {
-
-     printf("%c", *ch); 
-     ch++; 
-     }
-
-*/
-
   token = strtok(input, ifs_env);
 
   while (token != NULL) {
@@ -608,9 +595,6 @@ static int split_word(char *ifs_env, int elements, char *input, char *ptrArray[]
       //    printf("NULL TOKEN IS INSERTED\n"); 
       break;}
   }
-
-  // print_array(elements, ptrArray); 
-
   return elements;  
 }
 
@@ -705,13 +689,6 @@ static void manage_background_processes() {
 
     // other state changes: ignore 
   }
-
-  /*
-     if (childPID < 0) {
-     perror("Either no existing background processes or no more. waitpid() fails and returns...");  
-     }
-     */
-
 }
 
 /* Our signal handler for SIGINT */
@@ -758,11 +735,21 @@ static int cd_called(char *home_env, int *exitStatusForeground, int elements, ch
 
     // good len... `cd arg NULL`
     else {
-      // printf("pointer Array 1 is %s\n", ptrArray[1]); 
-      if (chdir(ptrArray[1]) != 0) { 
+
+      // insert a null terminator in filename cuz that's included in the mkdir file name     
+      size_t file_length = strlen(ptrArray[1]); 
+      char *fileName = malloc(file_length+1); 
+
+      strcpy(fileName, ptrArray[1]); 
+      fileName[file_length] = '\0';
+      
+
+           // printf("pointer Array 1 is %s\n", ptrArray[1]); 
+      if (chdir(fileName) != 0) { 
         fprintf(stderr, "chdir() failed on good len of args"); 
         *exitStatusForeground = 1;
       }
+      free(fileName);
       free(new_home);
     }
   }
