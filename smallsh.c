@@ -27,10 +27,10 @@ static int split_word(char *ifs_env, int elements, char *input, char *ptrArray[]
 static char *str_substitute(char *restrict *restrict haystack, char const *restrict needle, char const *restrict substitute); 
 
 // function to word expansion
-static void perform_expansion(char *home_env, pid_t backgroundProcessId, int exitStatusForeground, int elements, char *ptrArray[]);
+static void perform_expansion(char *home_env, pid_t *backgroundProcessId, int exitStatusForeground, int elements, char *ptrArray[]);
 
 // function to check for unwaited-for-background processes before taking user input 
-static void manage_background_processes(pid_t *backgroundProcessId);
+static void manage_background_processes();
 
 // SIGINT handler function
 static void handle_SIGINT(int signo);
@@ -58,16 +58,6 @@ int main(int argc, char *argv[]) {
   char *line = NULL;   // keep outside main infinite loop 
   size_t buff_size = 0;
 
-  // PS1 environment var
-  char *ps1_env = getenv("PS1");
-  if (ps1_env == NULL) { ps1_env = ""; }
-
-  // HOME environment var
-  char *home_env = getenv("HOME");
-  if (home_env == NULL) { home_env = ""; }
-
-  char *ifs_env = getenv("IFS");
-  if (ifs_env == NULL) {ifs_env = " \t\n"; }
 
   /* -------------------------------------------- */ 
   /*  SIGINT & SIGTSTP signal set-up (done) */
@@ -94,8 +84,21 @@ int main(int argc, char *argv[]) {
 
   int exitStatusForeground = 0;
   pid_t backgroundProcessId = -1;
+  pid_t mainChildPid = 0;
+
 
   for (;;) {
+
+    // PS1 environment var
+    char *ps1_env = getenv("PS1");
+    if (ps1_env == NULL) { ps1_env = ""; }
+
+    // HOME environment var
+    char *home_env = getenv("HOME");
+    if (home_env == NULL) { home_env = ""; }
+
+    char *ifs_env = getenv("IFS");
+    if (ifs_env == NULL) {ifs_env = " \t\n"; }
 
 
     char *outFile = NULL;
@@ -104,7 +107,7 @@ int main(int argc, char *argv[]) {
 
     int runInBackground = 0;
 
-    pid_t mainChildPid = 0;
+    //  pid_t mainChildPid = 0;
     int mainChildStatus = 0;
 
     int elements = 0;
@@ -112,7 +115,7 @@ int main(int argc, char *argv[]) {
     ssize_t bytes_read;
 
 
-    manage_background_processes(&backgroundProcessId); 
+    manage_background_processes(); 
 
     /*  ----  Input - The prompt (DONE) ------ */
     print_prompt(ps1_env);
@@ -154,17 +157,17 @@ int main(int argc, char *argv[]) {
 
 
     // perform expansion 
-    perform_expansion(home_env, backgroundProcessId, exitStatusForeground, elements, ptrArray);
+    perform_expansion(home_env, &backgroundProcessId, exitStatusForeground, elements, ptrArray);
 
-    // print_array(elements, ptrArray); 
+    //  print_array(elements, ptrArray); 
 
     //  printf("There are %d number of elements before parsing input", elements); 
     // parse tokenized input 
     //   printf("\nParsing user input:\n"); 
     parse_user_input(&outFile, &inFile, &runInBackground, elements, ptrArray);
 
-    // printf("The parsed input is: \n"); 
-    //print_array(elements, ptrArray);
+    //   printf("The parsed input is: \n"); 
+    //  print_array(elements, ptrArray);
 
     //  printf("InFile is %s\n", inFile); 
     //  printf("OutFile is %s\n", outFile); 
@@ -250,18 +253,18 @@ int main(int argc, char *argv[]) {
       default:
         // in parent process 
         // Wait for child's termination
-        printf("before runinBackground, %d\n", runInBackground); 
+        //  printf("before runinBackground, %d\n", runInBackground); 
         if (runInBackground == 2) {
           // don't wait on child process
-          mainChildPid = waitpid(spawnPid, &mainChildStatus, WNOHANG);
-       //   printf("In the parent process waitpid returned value %d\n", mainChildPid);
-          backgroundProcessId = mainChildPid;
+          backgroundProcessId = spawnPid;
+          break;
+
         }
 
         else {
 
           // blocking wait for child process 
-          mainChildPid = waitpid(spawnPid, &mainChildStatus, WNOHANG);
+          mainChildPid = waitpid(spawnPid, &mainChildStatus, WUNTRACED);
           //       printf("The parent is done waiting. The pid of child that terminated is %d\n", mainChildPid);
 
           if (WIFEXITED(mainChildStatus)){
@@ -279,6 +282,8 @@ int main(int argc, char *argv[]) {
 
           // if stopped 
           else if (WIFSTOPPED(mainChildStatus)) {
+
+            printf("WIFSTOPPED REACHED\n"); 
             int killStatus = 0;
 
             // if SIGCONT kill() fails
@@ -292,6 +297,8 @@ int main(int argc, char *argv[]) {
           //    exit(3);
           break; 
         }
+
+
     }
     // exit:
 
@@ -506,12 +513,12 @@ static void print_prompt(char *ps1_env) {
 
 }
 
-static void perform_expansion(char *home_env, pid_t backgroundProcessId, int exitStatusForeground, int elements, char *ptrArray[]) {
+static void perform_expansion(char *home_env, pid_t *backgroundProcessId, int exitStatusForeground, int elements, char *ptrArray[]) {
 
 
-  char exit_str[10];
-  char process_id[10];
-  char temp[50];
+  char exit_str[10] = {0};
+  char process_id[10] = {0};
+  char temp[50] = {0};
 
 
   int i = 0;
@@ -530,7 +537,7 @@ static void perform_expansion(char *home_env, pid_t backgroundProcessId, int exi
 
       // pre- bullet point 2: get the smallsh pid and transform into a str to use in str_substitute() 
       pid_t pid = getpid();
-      if (sprintf(temp, "%d", (int)pid) < 0) {
+      if (sprintf(temp, "%jd", (intmax_t)pid) < 0) {
         perror("sprintf failed... $$ replacement failed"); 
       }
 
@@ -544,11 +551,11 @@ static void perform_expansion(char *home_env, pid_t backgroundProcessId, int exi
       memset(exit_str, 0, 10);
 
       // bullet point 4: occurrence of “$!” within a word shall be replaced with the process ID of the most recent background process (see waiting)
-      if (backgroundProcessId == -1) {
+      if (*backgroundProcessId == -1) {
         str_substitute(&ptrArray[i], "$!", ""); 
       }
       else {
-        sprintf(process_id, "%d", backgroundProcessId);
+        sprintf(process_id, "%jd", (intmax_t)(*backgroundProcessId));
         str_substitute(&ptrArray[i], "$!", process_id);
         memset(process_id, 0, 10); 
       }
@@ -659,10 +666,11 @@ exit:
 }
 
 
-static void manage_background_processes(pid_t *backgroundProcessId) {
+static void manage_background_processes() {
 
 
   int childStatus = 0;
+  pid_t background_pid = 0; 
 
   // WNOHANG flag - waitpid() returns 0 when no child process terminates...
   // WUNTRACED constant - for stopped processes
@@ -670,18 +678,18 @@ static void manage_background_processes(pid_t *backgroundProcessId) {
   //      0 --> child process executes chunk 
   //      > 0 --> child process PID 
 
-  while ((*backgroundProcessId = waitpid(0, &childStatus, WNOHANG | WUNTRACED)) > 0) {
+  while ((background_pid = waitpid(0, &childStatus, WNOHANG | WUNTRACED)) > 0) {
 
     // if exited normally 
     if (WIFEXITED(childStatus)) {
       int exitStatus = WEXITSTATUS(childStatus);
-      fprintf(stderr, "Child process %jd done. Exit status %d.\n", (intmax_t) *backgroundProcessId, exitStatus);
+      fprintf(stderr, "Child process %jd done. Exit status %d.\n", (intmax_t) background_pid, exitStatus);
     }
 
     // if signaled
     else if (WIFSIGNALED(childStatus)) {
       int signalNumber = WTERMSIG(childStatus);
-      fprintf(stderr, "Child process %jd done. Signaled %d.\n", (intmax_t) *backgroundProcessId, signalNumber);
+      fprintf(stderr, "Child process %jd done. Signaled %d.\n", (intmax_t) background_pid, signalNumber);
     }
 
     // if stopped 
@@ -689,10 +697,10 @@ static void manage_background_processes(pid_t *backgroundProcessId) {
       int killStatus = 0;
 
       // if SIGCONT kill() fails
-      if ((killStatus = kill(*backgroundProcessId, SIGCONT)) == -1) {
+      if ((killStatus = kill(background_pid, SIGCONT)) == -1) {
         perror("kill() failed with the childPID.\n"); 
       }
-      fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t) *backgroundProcessId); 
+      fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t) background_pid); 
     }
 
     // other state changes: ignore 
@@ -785,7 +793,7 @@ static int exit_called(int elements, int *exitStatusForeground, char *ptrArray[]
       while ((childPID = waitpid(0, &childStatus, WNOHANG | WUNTRACED)) > 0) {
         int killStatus = 0;
         // if SIGCONT kill() fails
-        if ((killStatus = kill(childPID, SIGINT)) == -1) {
+        if ((killStatus = kill(0, SIGINT)) == -1) {
           perror("kill() failed with the childPID.\n"); 
         }
       }
@@ -827,7 +835,7 @@ static int exit_called(int elements, int *exitStatusForeground, char *ptrArray[]
           // check if child process group id of current child process == parent process group id
           int killStatus = 0;
           // if SIGCONT kill() fails
-          if ((killStatus = kill(childPID, SIGINT)) == -1) {
+          if ((killStatus = kill(0, SIGINT)) == -1) {
             perror("kill() failed with the childPID.\n"); 
           }
         }
