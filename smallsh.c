@@ -54,11 +54,6 @@ static int cd_called(char *home_env, int *exitStatusForeground, int elements, ch
 int main(int argc, char *argv[]) {
 
 
-
-  char *line = NULL;   // keep outside main infinite loop 
-  size_t buff_size = 0;
-
-
   /* -------------------------------------------- */ 
   /*  SIGINT & SIGTSTP signal set-up (done) */
   /* --------------------------------------------- */
@@ -82,10 +77,11 @@ int main(int argc, char *argv[]) {
     fflush(stdin); 
   }
 
+  char *line = NULL;   // keep outside main infinite loop 
+  size_t buff_size = 0;
   int exitStatusForeground = 0;
   pid_t backgroundProcessId = -1;
   pid_t mainChildPid = 0;
-
 
   for (;;) {
 
@@ -100,13 +96,10 @@ int main(int argc, char *argv[]) {
     char *ifs_env = getenv("IFS");
     if (ifs_env == NULL) {ifs_env = " \t\n"; }
 
-
     char *outFile = NULL;
     char *inFile = NULL; 
 
-
     int runInBackground = 0;
-
     int mainChildStatus = 0;
 
     int elements = 0;
@@ -158,7 +151,7 @@ int main(int argc, char *argv[]) {
     // perform expansion 
     perform_expansion(home_env, &backgroundProcessId, exitStatusForeground, elements, ptrArray);
 
-  //    print_array(elements, ptrArray); 
+    //    print_array(elements, ptrArray); 
 
     //  printf("There are %d number of elements before parsing input", elements); 
     // parse tokenized input 
@@ -181,7 +174,40 @@ int main(int argc, char *argv[]) {
       continue;
     }
 
-    if (cd_called(home_env, &exitStatusForeground, elements, ptrArray) == -11) {
+
+    char *home_copy_env = strdup(home_env);
+    size_t len = strlen(home_copy_env); 
+    char *new_home = malloc(len+2);
+    strcpy(new_home, home_copy_env);
+    new_home[len] = '/';
+    new_home[len+1] = '\0';
+
+
+    if (strcmp(ptrArray[0], "cd") == 0) {
+
+      // no args provided... `cd NULL`
+      if (elements == 2 || elements > 3) {
+        if (chdir(new_home) != 0) { 
+          fprintf(stderr, "no args provided but chdir() failed...\n");
+          exitStatusForeground = 1;
+        }
+      }
+
+      // more than 1 arg provided... `cd arg1 arg2 NULL` 
+      else if (elements >3) {
+        fprintf(stderr, "Failure..More than one arg provided to cd()\n");
+        exitStatusForeground = 1;
+      }
+      // good len... `cd arg NULL`
+      else {
+
+        if (chdir(ptrArray[1]) != 0) {
+          fprintf(stderr, "chdir() failed on good len of args"); 
+          exitStatusForeground = 1;
+        }
+      }
+
+      free(new_home);
       memset(line, 0, strlen(line));
       line = NULL;
       for (int u = 0; u < elements; u++) {
@@ -189,6 +215,19 @@ int main(int argc, char *argv[]) {
       }
       continue;
     }
+
+
+    /*
+       if (cd_called(home_env, &exitStatusForeground, elements, ptrArray) == -11) {
+       memset(line, 0, strlen(line));
+       line = NULL;
+       for (int u = 0; u < elements; u++) {
+       free(ptrArray[u]);
+       }
+       continue;
+       }
+       */
+
 
     // fork a new process 
     pid_t spawnPid = fork(); 
@@ -250,19 +289,15 @@ int main(int argc, char *argv[]) {
         }
 
       default:
-        // in parent process 
-        // Wait for child's termination
-        //  printf("before runinBackground, %d\n", runInBackground); 
+        // in parent process  - don't wait on child process
         if (runInBackground == 2) {
-          // don't wait on child process
           backgroundProcessId = spawnPid;
           break;
-
         }
 
         else {
 
-          // blocking wait for child process 
+          // blocking wait for child process - wait for child process 
           mainChildPid = waitpid(spawnPid, &mainChildStatus, WUNTRACED);
           //       printf("The parent is done waiting. The pid of child that terminated is %d\n", mainChildPid);
 
@@ -292,23 +327,16 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t) mainChildPid); 
             backgroundProcessId = mainChildPid;
           }
-
-          //    exit(3);
           break; 
         }
-
-
     }
-    // exit:
 
     memset(line, 0, strlen(line));
-    // free(line);
     line = NULL;
 
     // free each ptr array index
     for (int u = 0; u < elements; u++) {
       free(ptrArray[u]);
-
     }
 
   }
@@ -742,95 +770,96 @@ static int cd_called(char *home_env, int *exitStatusForeground, int elements, ch
 
       strcpy(fileName, ptrArray[1]); 
       fileName[file_length] = '\0';
-      
 
-           // printf("pointer Array 1 is %s\n", ptrArray[1]); 
-      if (chdir(fileName) != 0) { 
+
+      // printf("pointer Array 1 is %s\n", ptrArray[1]); 
+      //      if (chdir(fileName) != 0) { 
+      if (chdir(ptrArray[1]) != 0) {
         fprintf(stderr, "chdir() failed on good len of args"); 
         *exitStatusForeground = 1;
       }
-      free(fileName);
+      //    free(fileName);
       free(new_home);
     }
-  }
-  return 0;
+    }
+    return -11;
 door:
-  //printf("cd command error");
-  return -11;
+    //printf("cd command error");
+    return -11;
 
-}
-
-
-static int exit_called(int elements, int *exitStatusForeground, char *ptrArray[]) {
-
-  int isAnInt = 2;
-  int exit_val = -1111;
-  pid_t childPID = 0;
-  int childStatus = 0;
+  }
 
 
-  if (strcmp(ptrArray[0], "exit") == 0) {
+  static int exit_called(int elements, int *exitStatusForeground, char *ptrArray[]) {
 
-    // no arg provided ... `exit (NULL)`
-    if (elements == 2) {
-      exit_val = *exitStatusForeground;
-      fprintf(stderr, "\nexit\n");
+    int isAnInt = 2;
+    int exit_val = -1111;
+    pid_t childPID = 0;
+    int childStatus = 0;
 
-      // kill child processes in process group id w/ SIGINT.. don't wait using WNOHANG
-      while ((childPID = waitpid(0, &childStatus, WNOHANG | WUNTRACED)) > 0) {
-        int killStatus = 0;
-        // if SIGCONT kill() fails
-        if ((killStatus = kill(0, SIGINT)) == -1) {
-          perror("kill() failed with the childPID.\n"); 
-        }
-      }
-      exit(exit_val);
-    }
-    // more than 1 arg is provided... `exit arg1 arg2 (NULL)`
-    else if (elements > 3) {
-      fprintf(stderr, "Too many arguments provided to exit()...\n"); 
-      *exitStatusForeground = 1; 
-      return -11;
-    }
-    // good len... `exit arg (NULL)`
-    else if (elements == 3) {
-      // check if 2nd arg is an int or not
-      for (int i = 0; ptrArray[1][i] != '\0'; i++) {
-        // printf("running in the for loop when elem == 3\n");
-        // printf("char is %c\n", ptrArray[1][i]); 
-        if (isdigit(ptrArray[1][i]) == 0) {
-          printf("Not an int\n"); 
-          isAnInt = -2;
-          fprintf(stderr, "Argument passed into exit() is not an int..\n");
-          break;
-        }
-      }
 
-      // arg is not int --> leave func call 
-      if (isAnInt == -2) { 
-        fprintf(stderr, "exit command argrs is not an int\n");
-        *exitStatusForeground = 1;
-        return -11;
-      }
-      // arg is int
-      else if (isAnInt == 2) {
-        exit_val = atoi(ptrArray[1]);
+    if (strcmp(ptrArray[0], "exit") == 0) {
+
+      // no arg provided ... `exit (NULL)`
+      if (elements == 2) {
+        exit_val = *exitStatusForeground;
         fprintf(stderr, "\nexit\n");
 
         // kill child processes in process group id w/ SIGINT.. don't wait using WNOHANG
         while ((childPID = waitpid(0, &childStatus, WNOHANG | WUNTRACED)) > 0) {
-          // check if child process group id of current child process == parent process group id
           int killStatus = 0;
           // if SIGCONT kill() fails
           if ((killStatus = kill(0, SIGINT)) == -1) {
             perror("kill() failed with the childPID.\n"); 
           }
         }
+        exit(exit_val);
       }
-      exit(exit_val);
-    }
-  }
+      // more than 1 arg is provided... `exit arg1 arg2 (NULL)`
+      else if (elements > 3) {
+        fprintf(stderr, "Too many arguments provided to exit()...\n"); 
+        *exitStatusForeground = 1; 
+        return -11;
+      }
+      // good len... `exit arg (NULL)`
+      else if (elements == 3) {
+        // check if 2nd arg is an int or not
+        for (int i = 0; ptrArray[1][i] != '\0'; i++) {
+          // printf("running in the for loop when elem == 3\n");
+          // printf("char is %c\n", ptrArray[1][i]); 
+          if (isdigit(ptrArray[1][i]) == 0) {
+            printf("Not an int\n"); 
+            isAnInt = -2;
+            fprintf(stderr, "Argument passed into exit() is not an int..\n");
+            break;
+          }
+        }
 
-  return 0;
-}
+        // arg is not int --> leave func call 
+        if (isAnInt == -2) { 
+          fprintf(stderr, "exit command argrs is not an int\n");
+          *exitStatusForeground = 1;
+          return -11;
+        }
+        // arg is int
+        else if (isAnInt == 2) {
+          exit_val = atoi(ptrArray[1]);
+          fprintf(stderr, "\nexit\n");
+
+          // kill child processes in process group id w/ SIGINT.. don't wait using WNOHANG
+          while ((childPID = waitpid(0, &childStatus, WNOHANG | WUNTRACED)) > 0) {
+            // check if child process group id of current child process == parent process group id
+            int killStatus = 0;
+            // if SIGCONT kill() fails
+            if ((killStatus = kill(0, SIGINT)) == -1) {
+              perror("kill() failed with the childPID.\n"); 
+            }
+          }
+        }
+        exit(exit_val);
+      }
+    }
+
+    return 0;
+  }
 
