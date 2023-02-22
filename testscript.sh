@@ -83,14 +83,14 @@ export IFS=$'\t'$'\n'
 exec ./smallsh << __EOF__
 echo	$hr
 printf	$(tput bold setaf 4)Input / Output redirection operators$(tput sgr0)\n
-printf	Testing: $(tput bold)head -c 1000 /dev/random > 1k-random-bytes$(tput sgr0)\n
-head	-c	1000	/dev/random	>	1k-random-bytes
+printf	Testing: $(tput bold)head -c 1000 /dev/zero > 1k-random-bytes$(tput sgr0)\n
+head	-c	1000	/dev/zero	>	1k-random-bytes
 printf	Testing: $(tput bold)wc -c 1k-random-bytes$(tput sgr0) (Expecting "1000 1k-random-bytes", $(tput setaf 4 bold)15 points$(tput sgr0))\n
 wc	-c	1k-random-bytes
 printf	Testing: $(tput bold)wc -c < 1k-random-bytes$(tput sgr0) (Expecting "1000", $(tput setaf 4 bold)10 points$(tput sgr0))\n
 wc	-c	<	1k-random-bytes
 printf	Testing: $(tput bold)head -c 10000 < /dev/random > 10k-random-bytes$(tput sgr0)\n
-head	-c	10000	<	/dev/random	>	10k-random-bytes
+head	-c	10000	<	/dev/zero	>	10k-random-bytes
 printf	Testing: $(tput bold)wc -c 10k-random-bytes$(tput sgr0) (Expecting "10000 10k-random-bytes", $(tput setaf 4 bold)15 points$(tput sgr0))\n
 wc	-c	10k-random-bytes
 

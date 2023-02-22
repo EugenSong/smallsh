@@ -73,10 +73,6 @@ int main(int argc, char *argv[]) {
   sigaction(SIGTSTP, &ignore_action, &old_tstp_action);
 
 
-  if (feof(stdin) == 0) {
-    fflush(stdin); 
-  }
-
   char *line = NULL;   // keep outside main infinite loop 
   size_t buff_size = 0;
   int exitStatusForeground = 0;
@@ -116,9 +112,9 @@ int main(int argc, char *argv[]) {
     // read input from stdin
     bytes_read = getline(&line, &buff_size, stdin);
 
-    if (feof(stdin)) {
+    if (feof(stdin) != 0) {
+      fprintf(stderr, "\nexit\n");
       exit(exitStatusForeground);
-      break;
     }
 
     // signal interrupt or getline() fail...reset errno and  
